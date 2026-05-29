@@ -148,6 +148,8 @@ async def generate_3d(
         failed:        True if generation failed.
         error_message: Human-readable error if failed is True.
     """
+    if _startup_error:
+        return {"failed": True, "error_message": _startup_error}
     resolved_llm = llm or PROVIDER_DEFAULT_MODELS.get(provider, "gemini-2.0-flash")
     token = _get_token()
     base_url = _get_api_url()
@@ -224,6 +226,8 @@ async def regenerate_part(
         failed:        True if regeneration failed.
         error_message: Human-readable error if failed is True.
     """
+    if _startup_error:
+        return {"failed": True, "error_message": _startup_error}
     resolved_llm = llm or PROVIDER_DEFAULT_MODELS.get(provider, "gemini-2.0-flash")
     token = _get_token()
     base_url = _get_api_url()
@@ -292,6 +296,8 @@ async def add_part(
         failed:        True if the add operation failed.
         error_message: Human-readable error if failed is True.
     """
+    if _startup_error:
+        return {"failed": True, "error_message": _startup_error}
     resolved_llm = llm or PROVIDER_DEFAULT_MODELS.get(provider, "gemini-2.0-flash")
     token = _get_token()
     base_url = _get_api_url()
@@ -366,6 +372,8 @@ async def articulate_model(
         failed:        True if articulation failed.
         error_message: Human-readable error if failed is True.
     """
+    if _startup_error:
+        return {"failed": True, "error_message": _startup_error}
     resolved_llm = llm or PROVIDER_DEFAULT_MODELS.get(provider, "gemini-2.0-flash")
     token = _get_token()
     base_url = _get_api_url()
@@ -419,6 +427,8 @@ async def get_generation_status(workflow_id: str) -> Dict[str, Any]:
         progress_label: Human-readable progress description.
         current_node:   Internal pipeline node currently executing.
     """
+    if _startup_error:
+        return {"failed": True, "error_message": _startup_error}
     token = _get_token()
     base_url = _get_api_url()
 
