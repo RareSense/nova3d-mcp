@@ -256,3 +256,31 @@ async def test_generate_raises_auth_error_with_code(mock_api):
                 llm="gemini-2.0-flash",
                 api_key="n3d_test",
             )
+
+
+@pytest.mark.asyncio
+async def test_get_me_success(mock_api):
+    mock_api.get("/me").mock(
+        return_value=httpx.Response(200, json={
+            "user_id": "b333345d-a36c-487e-9096-5f7fd9a2901b",
+            "email": "hassan@raresense.so",
+            "available_credits": 1000,
+            "tenant_id": "ten_e06a051bdb1f43b7b9d5bfaea1e07bf0",
+        })
+    )
+    async with Nova3DClient(token=FAKE_TOKEN, base_url=BASE_URL) as client:
+        me = await client.get_me()
+    assert me["email"] == "hassan@raresense.so"
+    assert me["available_credits"] == 1000
+
+
+@pytest.mark.asyncio
+async def test_get_me_invalid_key(mock_api):
+    mock_api.get("/me").mock(
+        return_value=httpx.Response(401, json={
+            "detail": {"code": "invalid_api_key", "message": "Bad key."}
+        })
+    )
+    async with Nova3DClient(token="n3d_bad", base_url=BASE_URL) as client:
+        with pytest.raises(Nova3DAuthError, match="invalid"):
+            await client.get_me()

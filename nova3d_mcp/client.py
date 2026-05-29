@@ -265,6 +265,10 @@ class Nova3DClient:
         )
         return GenerationResult.from_api(resp, workflow_id, self._preview_base.replace("/preview", ""))
 
+    async def get_me(self) -> Dict[str, Any]:
+        """Verify credentials and return user identity from GET /me."""
+        return await self._get("/me")
+
     def preview_url(self, workflow_id: str) -> str:
         return f"{self._preview_base}/{workflow_id}"
 
