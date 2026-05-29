@@ -306,3 +306,61 @@ def test_result_parsing_api_key_source_present():
 def test_result_parsing_api_key_source_absent():
     result = GenerationResult.from_api(_result_ok(), WORKFLOW_ID)
     assert result.api_key_source is None
+
+
+# ── Startup validation tests ──────────────────────────────────────────────────
+
+from nova3d_mcp.server import _validate_startup
+
+
+@pytest.mark.asyncio
+async def test_validate_startup_no_token(monkeypatch, capsys):
+    monkeypatch.delenv("NOVA3D_TOKEN", raising=False)
+    with pytest.raises(SystemExit) as exc_info:
+        await _validate_startup()
+    assert exc_info.value.code == 1
+    captured = capsys.readouterr()
+    assert "NOVA3D_TOKEN is not set" in captured.err
+
+
+@pytest.mark.asyncio
+async def test_validate_startup_success(mock_api, monkeypatch, capsys):
+    monkeypatch.setenv("NOVA3D_TOKEN", "n3d_validkey")
+    mock_api.get("/me").mock(
+        return_value=httpx.Response(200, json={
+            "user_id": "abc",
+            "email": "test@example.com",
+            "available_credits": 0,
+            "tenant_id": "ten_abc",
+        })
+    )
+    await _validate_startup()  # must not raise
+    captured = capsys.readouterr()
+    assert "test@example.com" in captured.err
+
+
+@pytest.mark.asyncio
+async def test_validate_startup_revoked_key(mock_api, monkeypatch, capsys):
+    monkeypatch.setenv("NOVA3D_TOKEN", "n3d_revoked")
+    mock_api.get("/me").mock(
+        return_value=httpx.Response(401, json={
+            "detail": {"code": "api_key_revoked", "message": "Revoked."}
+        })
+    )
+    with pytest.raises(SystemExit) as exc_info:
+        await _validate_startup()
+    assert exc_info.value.code == 1
+    captured = capsys.readouterr()
+    assert "revoked" in captured.err.lower()
+
+
+@pytest.mark.asyncio
+async def test_validate_startup_network_error(monkeypatch, capsys):
+    monkeypatch.setenv("NOVA3D_TOKEN", "n3d_testkey")
+    with respx.mock(base_url=BASE_URL) as mock:
+        mock.get("/me").mock(side_effect=httpx.NetworkError("Connection refused"))
+        with pytest.raises(SystemExit) as exc_info:
+            await _validate_startup()
+    assert exc_info.value.code == 1
+    captured = capsys.readouterr()
+    assert "connection" in captured.err.lower() or "network" in captured.err.lower()

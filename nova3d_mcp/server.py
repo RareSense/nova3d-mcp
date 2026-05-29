@@ -18,13 +18,15 @@ Usage:
 """
 from __future__ import annotations
 
+import asyncio
 import os
+import sys
 from typing import Any, Dict, List, Optional
 
 from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP
 
-from nova3d_mcp.client import Nova3DClient, Nova3DError
+from nova3d_mcp.client import Nova3DClient, Nova3DAuthError, Nova3DError
 from nova3d_mcp.models import PROVIDER_DEFAULT_MODELS
 
 load_dotenv()
@@ -60,6 +62,35 @@ def _get_token() -> str:
 
 def _get_api_url() -> str:
     return os.environ.get("NOVA3D_API_URL", "https://nova3d.xyz/api").rstrip("/")
+
+
+async def _validate_startup() -> None:
+    """Validate NOVA3D_TOKEN against GET /api/me before accepting any tool calls."""
+    token = os.environ.get("NOVA3D_TOKEN", "").strip()
+    if not token:
+        print(
+            "Nova3D: NOVA3D_TOKEN is not set.\n"
+            "Create an API key at https://nova3d.xyz/settings → API Keys,\n"
+            "then set it as NOVA3D_TOKEN in your MCP config and restart.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    base_url = _get_api_url()
+    try:
+        async with Nova3DClient(token=token, base_url=base_url) as client:
+            me = await client.get_me()
+        print(f"✓ Nova3D authenticated: {me['email']}", file=sys.stderr)
+    except Nova3DAuthError as e:
+        print(str(e), file=sys.stderr)
+        sys.exit(1)
+    except Nova3DError as e:
+        print(
+            f"Could not reach Nova3D to verify token: {e}\n"
+            "Check your connection and try again.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
 
 # ── Tools ─────────────────────────────────────────────────────────────────────
@@ -394,6 +425,7 @@ async def get_generation_status(workflow_id: str) -> Dict[str, Any]:
 # ── Entrypoint ────────────────────────────────────────────────────────────────
 
 def main() -> None:
+    asyncio.run(_validate_startup())
     mcp.run()
 
 
