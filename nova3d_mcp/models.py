@@ -7,6 +7,7 @@ Derived from the Nova3D frontend (CadService, cad_models.dart).
 """
 from __future__ import annotations
 
+import re
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
@@ -276,13 +277,28 @@ def _extract_part_names(
     unwrapped: Dict[str, Any],
     joints: List[Dict[str, Any]],
 ) -> List[str]:
-    """Extract named part/mesh identifiers from joints or code artifact."""
-    names: List[str] = []
+    """Extract named part/mesh identifiers from the result."""
+    # 1. API-first: use explicit parts field if the backend returns one
+    api_parts = unwrapped.get("parts")
+    if isinstance(api_parts, list) and api_parts:
+        return [str(p) for p in api_parts if p]
+
+    # 2. Regex over Blender construction script — obj.name = "part_name"
+    code_artifact = unwrapped.get("code_artifact")
+    if isinstance(code_artifact, dict):
+        content = code_artifact.get("content") or ""
+        if content:
+            names = re.findall(r'\.name\s*=\s*["\']([^"\']+)["\']', content)
+            if names:
+                return list(dict.fromkeys(names))  # deduplicate, preserve order
+
+    # 3. Fallback: extract from joints (articulated assets)
+    names = []
     for joint in joints:
         mesh = joint.get("mesh") or joint.get("name")
         if isinstance(mesh, str) and mesh.strip():
             names.append(mesh.strip())
-    return list(dict.fromkeys(names))  # deduplicate, preserve order
+    return list(dict.fromkeys(names))
 
 
 def _extract_failure(

@@ -364,3 +364,48 @@ async def test_validate_startup_network_error(monkeypatch, capsys):
     assert exc_info.value.code == 1
     captured = capsys.readouterr()
     assert "connection" in captured.err.lower() or "network" in captured.err.lower()
+
+
+def test_result_parsing_parts_from_code_artifact():
+    data = {
+        "sketch_to_3d_generator": [
+            {
+                "result": {
+                    "model_url": "https://nova3d.xyz/assets/abc123.glb",
+                    "model_artifact": {"url": "https://nova3d.xyz/assets/abc123.glb"},
+                    "code_artifact": {
+                        "content": (
+                            "import bpy\n"
+                            "bpy.ops.mesh.primitive_cube_add()\n"
+                            "obj = bpy.context.active_object\n"
+                            "obj.name = \"body\"\n"
+                            "bpy.ops.mesh.primitive_cylinder_add()\n"
+                            "wheel = bpy.context.active_object\n"
+                            "wheel.name = \"wheel_fr\"\n"
+                        )
+                    },
+                }
+            }
+        ]
+    }
+    result = GenerationResult.from_api(data, WORKFLOW_ID)
+    assert result.parts == ["body", "wheel_fr"]
+
+
+def test_result_parsing_parts_api_field_takes_precedence():
+    data = {
+        "sketch_to_3d_generator": [
+            {
+                "result": {
+                    "model_url": "https://nova3d.xyz/assets/abc123.glb",
+                    "model_artifact": {"url": "https://nova3d.xyz/assets/abc123.glb"},
+                    "code_artifact": {
+                        "content": 'obj.name = "should_not_appear"'
+                    },
+                    "parts": ["door", "frame"],
+                }
+            }
+        ]
+    }
+    result = GenerationResult.from_api(data, WORKFLOW_ID)
+    assert result.parts == ["door", "frame"]
