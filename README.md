@@ -40,14 +40,17 @@ regenerating everything.
 
 ### 1. Install
 
+**Once on PyPI (coming soon):**
 ```bash
 uvx nova3d-mcp
 ```
 
-Or with pip:
-
+**From source (available now):**
 ```bash
-pip install nova3d-mcp
+git clone https://github.com/RareSense/nova3d-mcp.git
+cd nova3d-mcp
+python3.10 -m venv .venv && source .venv/bin/activate
+pip install .
 ```
 
 ### 2. Get an API key
@@ -63,12 +66,27 @@ and prints a clear error if it's missing or invalid.
 
 ### 3. Add to Claude Code
 
+**Once on PyPI:**
 ```json
 {
   "mcpServers": {
     "nova3d": {
       "command": "uvx",
       "args": ["nova3d-mcp"],
+      "env": {
+        "NOVA3D_TOKEN": "n3d_your-api-key-here"
+      }
+    }
+  }
+}
+```
+
+**From source (after `pip install .`):**
+```json
+{
+  "mcpServers": {
+    "nova3d": {
+      "command": "nova3d-mcp",
       "env": {
         "NOVA3D_TOKEN": "n3d_your-api-key-here"
       }
