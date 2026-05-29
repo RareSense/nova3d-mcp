@@ -45,8 +45,15 @@ mcp = FastMCP(
         "separately editable mesh components — not fused blobs. "
         "Each tool call returns a GLB download URL and a browser preview URL "
         "where you can inspect and interact with the generated parts. "
-        "Requires NOVA3D_TOKEN env var (JWT from nova3d.xyz) and a BYOK API key "
-        "for your chosen LLM provider (Google, Anthropic, or OpenAI)."
+        "\n\n"
+        "SETUP: This server requires two credentials:\n"
+        "1. NOVA3D_TOKEN — a Nova3D API key. If the user has not set this, "
+        "proactively tell them: 'To use Nova3D, you need an API key. "
+        "Get one at https://nova3d.xyz/settings → API Keys, then run: "
+        "claude mcp add nova3d -e NOVA3D_TOKEN=n3d_your-key -- uvx nova3d-mcp'\n"
+        "2. A BYOK provider key (Google, Anthropic, or OpenAI) passed as `api_key` in each tool call.\n"
+        "\n"
+        "If any tool returns {\"failed\": true}, surface the error_message to the user verbatim."
     ),
 )
 
