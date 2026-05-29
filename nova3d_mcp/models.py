@@ -163,6 +163,7 @@ class GenerationResult(BaseModel):
     error_message: Optional[str] = None
     error_category: Optional[str] = None
     retryable: bool = False
+    api_key_source: Optional[str] = None
     workflow_id: str = ""
 
     @classmethod
@@ -192,6 +193,7 @@ class GenerationResult(BaseModel):
         joints = _extract_joints(unwrapped)
         joint_count = _int_val(unwrapped.get("joint_count")) or len(joints)
         operation = _str_val(unwrapped.get("operation"))
+        api_key_source = _str_val(unwrapped.get("api_key_source"))
         parts = _extract_part_names(unwrapped, joints)
         failure = _extract_failure(unwrapped)
         error_message = (failure.get("message") if failure else None) or _extract_root_error(data)
@@ -212,6 +214,7 @@ class GenerationResult(BaseModel):
             error_message=error_message,
             error_category=failure.get("category") if failure else None,
             retryable=failure.get("retryable", False) if failure else False,
+            api_key_source=api_key_source,
             workflow_id=workflow_id,
         )
 

@@ -284,3 +284,25 @@ async def test_get_me_invalid_key(mock_api):
     async with Nova3DClient(token="n3d_bad", base_url=BASE_URL) as client:
         with pytest.raises(Nova3DAuthError, match="invalid"):
             await client.get_me()
+
+
+def test_result_parsing_api_key_source_present():
+    data = {
+        "sketch_to_3d_generator": [
+            {
+                "result": {
+                    "model_url": "https://nova3d.xyz/assets/abc123.glb",
+                    "model_artifact": {"url": "https://nova3d.xyz/assets/abc123.glb"},
+                    "code_artifact": {"content": "import bpy"},
+                    "api_key_source": "request",
+                }
+            }
+        ]
+    }
+    result = GenerationResult.from_api(data, WORKFLOW_ID)
+    assert result.api_key_source == "request"
+
+
+def test_result_parsing_api_key_source_absent():
+    result = GenerationResult.from_api(_result_ok(), WORKFLOW_ID)
+    assert result.api_key_source is None
