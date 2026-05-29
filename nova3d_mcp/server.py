@@ -31,6 +31,10 @@ from nova3d_mcp.models import PROVIDER_DEFAULT_MODELS
 
 load_dotenv()
 
+# ── Startup error state ───────────────────────────────────────────────────────
+
+_startup_error: Optional[str] = None
+
 # ── Server init ───────────────────────────────────────────────────────────────
 
 mcp = FastMCP(
@@ -41,8 +45,15 @@ mcp = FastMCP(
         "separately editable mesh components — not fused blobs. "
         "Each tool call returns a GLB download URL and a browser preview URL "
         "where you can inspect and interact with the generated parts. "
-        "Requires NOVA3D_TOKEN env var (JWT from nova3d.xyz) and a BYOK API key "
-        "for your chosen LLM provider (Google, Anthropic, or OpenAI)."
+        "\n\n"
+        "SETUP: This server requires two credentials:\n"
+        "1. NOVA3D_TOKEN — a Nova3D API key. If the user has not set this, "
+        "proactively tell them: 'To use Nova3D, you need an API key. "
+        "Get one at https://nova3d.xyz/settings → API Keys, then run: "
+        "claude mcp add nova3d -e NOVA3D_TOKEN=n3d_your-key -- uvx nova3d-mcp'\n"
+        "2. A BYOK provider key (Google, Anthropic, or OpenAI) passed as `api_key` in each tool call.\n"
+        "\n"
+        "If any tool returns {\"failed\": true}, surface the error_message to the user verbatim."
     ),
 )
 
@@ -65,16 +76,21 @@ def _get_api_url() -> str:
 
 
 async def _validate_startup() -> None:
-    """Validate NOVA3D_TOKEN against GET /api/me before accepting any tool calls."""
+    """Validate NOVA3D_TOKEN against GET /api/me. Stores error in _startup_error instead of exiting."""
+    global _startup_error
+
     token = os.environ.get("NOVA3D_TOKEN", "").strip()
     if not token:
+        _startup_error = (
+            "NOVA3D_TOKEN is not set. "
+            "Create an API key at https://nova3d.xyz/settings → API Keys, "
+            "then set it as NOVA3D_TOKEN in your MCP config and restart."
+        )
         print(
-            "Nova3D: NOVA3D_TOKEN is not set.\n"
-            "Create an API key at https://nova3d.xyz/settings → API Keys,\n"
-            "then set it as NOVA3D_TOKEN in your MCP config and restart.",
+            f"Nova3D: {_startup_error}",
             file=sys.stderr,
         )
-        sys.exit(1)
+        return
 
     base_url = _get_api_url()
     try:
@@ -82,15 +98,14 @@ async def _validate_startup() -> None:
             me = await client.get_me()
         print(f"✓ Nova3D authenticated: {me['email']}", file=sys.stderr)
     except Nova3DAuthError as e:
-        print(str(e), file=sys.stderr)
-        sys.exit(1)
+        _startup_error = str(e)
+        print(_startup_error, file=sys.stderr)
     except Nova3DError as e:
-        print(
+        _startup_error = (
             f"Could not reach Nova3D to verify token: {e}\n"
-            "Check your connection and try again.",
-            file=sys.stderr,
+            "Check your connection and try again."
         )
-        sys.exit(1)
+        print(_startup_error, file=sys.stderr)
 
 
 # ── Tools ─────────────────────────────────────────────────────────────────────
@@ -140,6 +155,8 @@ async def generate_3d(
         failed:        True if generation failed.
         error_message: Human-readable error if failed is True.
     """
+    if _startup_error:
+        return {"failed": True, "error_message": _startup_error}
     resolved_llm = llm or PROVIDER_DEFAULT_MODELS.get(provider, "gemini-2.0-flash")
     token = _get_token()
     base_url = _get_api_url()
@@ -216,6 +233,8 @@ async def regenerate_part(
         failed:        True if regeneration failed.
         error_message: Human-readable error if failed is True.
     """
+    if _startup_error:
+        return {"failed": True, "error_message": _startup_error}
     resolved_llm = llm or PROVIDER_DEFAULT_MODELS.get(provider, "gemini-2.0-flash")
     token = _get_token()
     base_url = _get_api_url()
@@ -284,6 +303,8 @@ async def add_part(
         failed:        True if the add operation failed.
         error_message: Human-readable error if failed is True.
     """
+    if _startup_error:
+        return {"failed": True, "error_message": _startup_error}
     resolved_llm = llm or PROVIDER_DEFAULT_MODELS.get(provider, "gemini-2.0-flash")
     token = _get_token()
     base_url = _get_api_url()
@@ -358,6 +379,8 @@ async def articulate_model(
         failed:        True if articulation failed.
         error_message: Human-readable error if failed is True.
     """
+    if _startup_error:
+        return {"failed": True, "error_message": _startup_error}
     resolved_llm = llm or PROVIDER_DEFAULT_MODELS.get(provider, "gemini-2.0-flash")
     token = _get_token()
     base_url = _get_api_url()
@@ -411,6 +434,8 @@ async def get_generation_status(workflow_id: str) -> Dict[str, Any]:
         progress_label: Human-readable progress description.
         current_node:   Internal pipeline node currently executing.
     """
+    if _startup_error:
+        return {"failed": True, "error_message": _startup_error}
     token = _get_token()
     base_url = _get_api_url()
 

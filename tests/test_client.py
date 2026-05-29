@@ -315,12 +315,15 @@ from nova3d_mcp.server import _validate_startup
 
 @pytest.mark.asyncio
 async def test_validate_startup_no_token(monkeypatch, capsys):
+    import nova3d_mcp.server as server_module
+    server_module._startup_error = None
     monkeypatch.delenv("NOVA3D_TOKEN", raising=False)
-    with pytest.raises(SystemExit) as exc_info:
-        await _validate_startup()
-    assert exc_info.value.code == 1
+    await _validate_startup()
+    assert server_module._startup_error is not None
+    assert "NOVA3D_TOKEN is not set" in server_module._startup_error
     captured = capsys.readouterr()
     assert "NOVA3D_TOKEN is not set" in captured.err
+    server_module._startup_error = None
 
 
 @pytest.mark.asyncio
@@ -341,29 +344,35 @@ async def test_validate_startup_success(mock_api, monkeypatch, capsys):
 
 @pytest.mark.asyncio
 async def test_validate_startup_revoked_key(mock_api, monkeypatch, capsys):
+    import nova3d_mcp.server as server_module
+    server_module._startup_error = None
     monkeypatch.setenv("NOVA3D_TOKEN", "n3d_revoked")
     mock_api.get("/me").mock(
         return_value=httpx.Response(401, json={
             "detail": {"code": "api_key_revoked", "message": "Revoked."}
         })
     )
-    with pytest.raises(SystemExit) as exc_info:
-        await _validate_startup()
-    assert exc_info.value.code == 1
+    await _validate_startup()
+    assert server_module._startup_error is not None
+    assert "revoked" in server_module._startup_error.lower()
     captured = capsys.readouterr()
     assert "revoked" in captured.err.lower()
+    server_module._startup_error = None
 
 
 @pytest.mark.asyncio
 async def test_validate_startup_network_error(monkeypatch, capsys):
+    import nova3d_mcp.server as server_module
+    server_module._startup_error = None
     monkeypatch.setenv("NOVA3D_TOKEN", "n3d_testkey")
     with respx.mock(base_url=BASE_URL) as mock:
         mock.get("/me").mock(side_effect=httpx.NetworkError("Connection refused"))
-        with pytest.raises(SystemExit) as exc_info:
-            await _validate_startup()
-    assert exc_info.value.code == 1
+        await _validate_startup()
+    assert server_module._startup_error is not None
+    assert "connection" in server_module._startup_error.lower() or "network" in server_module._startup_error.lower()
     captured = capsys.readouterr()
     assert "connection" in captured.err.lower() or "network" in captured.err.lower()
+    server_module._startup_error = None
 
 
 def test_result_parsing_parts_from_code_artifact():
