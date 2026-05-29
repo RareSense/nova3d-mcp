@@ -31,6 +31,10 @@ from nova3d_mcp.models import PROVIDER_DEFAULT_MODELS
 
 load_dotenv()
 
+# ── Startup error state ───────────────────────────────────────────────────────
+
+_startup_error: Optional[str] = None
+
 # ── Server init ───────────────────────────────────────────────────────────────
 
 mcp = FastMCP(
@@ -65,16 +69,21 @@ def _get_api_url() -> str:
 
 
 async def _validate_startup() -> None:
-    """Validate NOVA3D_TOKEN against GET /api/me before accepting any tool calls."""
+    """Validate NOVA3D_TOKEN against GET /api/me. Stores error in _startup_error instead of exiting."""
+    global _startup_error
+
     token = os.environ.get("NOVA3D_TOKEN", "").strip()
     if not token:
+        _startup_error = (
+            "NOVA3D_TOKEN is not set. "
+            "Create an API key at https://nova3d.xyz/settings → API Keys, "
+            "then set it as NOVA3D_TOKEN in your MCP config and restart."
+        )
         print(
-            "Nova3D: NOVA3D_TOKEN is not set.\n"
-            "Create an API key at https://nova3d.xyz/settings → API Keys,\n"
-            "then set it as NOVA3D_TOKEN in your MCP config and restart.",
+            f"Nova3D: {_startup_error}",
             file=sys.stderr,
         )
-        sys.exit(1)
+        return
 
     base_url = _get_api_url()
     try:
@@ -82,15 +91,14 @@ async def _validate_startup() -> None:
             me = await client.get_me()
         print(f"✓ Nova3D authenticated: {me['email']}", file=sys.stderr)
     except Nova3DAuthError as e:
-        print(str(e), file=sys.stderr)
-        sys.exit(1)
+        _startup_error = str(e)
+        print(_startup_error, file=sys.stderr)
     except Nova3DError as e:
-        print(
+        _startup_error = (
             f"Could not reach Nova3D to verify token: {e}\n"
-            "Check your connection and try again.",
-            file=sys.stderr,
+            "Check your connection and try again."
         )
-        sys.exit(1)
+        print(_startup_error, file=sys.stderr)
 
 
 # ── Tools ─────────────────────────────────────────────────────────────────────
