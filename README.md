@@ -38,22 +38,7 @@ regenerating everything.
 
 ## Quickstart
 
-### 1. Install
-
-**Once on PyPI (coming soon):**
-```bash
-uvx nova3d-mcp
-```
-
-**From source (available now):**
-```bash
-git clone https://github.com/RareSense/nova3d-mcp.git
-cd nova3d-mcp
-python3.10 -m venv .venv && source .venv/bin/activate
-pip install .
-```
-
-### 2. Get an API key
+### 1. Get an API key
 
 Sign in at [nova3d.xyz](https://nova3d.xyz), go to **Settings → API Keys**, and create a key.
 
@@ -64,9 +49,13 @@ export NOVA3D_TOKEN="n3d_your-api-key-here"
 API keys never expire unless revoked. The MCP server validates your key on startup
 and prints a clear error if it's missing or invalid.
 
-### 3. Add to Claude Code
+### 2. Configure Your Agent
 
-**Once on PyPI:**
+You can run `nova3d-mcp` directly using `uvx` (recommended) or by installing from source.
+
+#### Option A: Running via PyPI (Recommended)
+Add this to your agent's configuration file (e.g., `claude_desktop_config.json`):
+
 ```json
 {
   "mcpServers": {
@@ -81,7 +70,18 @@ and prints a clear error if it's missing or invalid.
 }
 ```
 
-**From source (after `pip install .`):**
+#### Option B: Installing from Source
+Clone the repository and install the package locally:
+
+```bash
+git clone https://github.com/RareSense/nova3d-mcp.git
+cd nova3d-mcp
+python3.10 -m venv .venv && source .venv/bin/activate
+pip install .
+```
+
+Then add this to your agent's configuration file:
+
 ```json
 {
   "mcpServers": {
@@ -95,7 +95,9 @@ and prints a clear error if it's missing or invalid.
 }
 ```
 
-### 4. Generate
+### 3. Generate
+
+Pass a prompt like this to your AI agent:
 
 ```
 Generate a vending machine with separate door, glass panel, coin slot,
@@ -135,9 +137,6 @@ Generate a structured 3D asset from text (and optional reference image).
 | `llm` | string | | Model ID. Defaults to recommended per provider. |
 | `image_base64` | string | | Reference image as plain base64 |
 | `image_mime` | string | | e.g. `"image/jpeg"` |
-
-**Recommended provider:** `google` with `gemini-2.0-flash` — best spatial
-reasoning for complex multi-part objects.
 
 ---
 
