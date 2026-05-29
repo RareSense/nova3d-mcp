@@ -195,7 +195,7 @@ class GenerationResult(BaseModel):
         joint_count = _int_val(unwrapped.get("joint_count")) or len(joints)
         operation = _str_val(unwrapped.get("operation"))
         api_key_source = _str_val(unwrapped.get("api_key_source"))
-        parts = _extract_part_names(unwrapped, joints)
+        parts = _extract_part_names(unwrapped, joints, code_artifact)
         failure = _extract_failure(unwrapped)
         error_message = (failure.get("message") if failure else None) or _extract_root_error(data)
         failed = glb_url is None and (_is_failed(data) or error_message is not None)
@@ -276,6 +276,7 @@ def _extract_joints(unwrapped: Dict[str, Any]) -> List[Dict[str, Any]]:
 def _extract_part_names(
     unwrapped: Dict[str, Any],
     joints: List[Dict[str, Any]],
+    code_artifact: Optional[Dict[str, Any]] = None,
 ) -> List[str]:
     """Extract named part/mesh identifiers from the result."""
     # 1. API-first: use explicit parts field if the backend returns one
@@ -284,7 +285,6 @@ def _extract_part_names(
         return [str(p) for p in api_parts if p]
 
     # 2. Regex over Blender construction script — obj.name = "part_name"
-    code_artifact = unwrapped.get("code_artifact")
     if isinstance(code_artifact, dict):
         content = code_artifact.get("content") or ""
         if content:
