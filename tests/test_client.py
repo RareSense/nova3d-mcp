@@ -9,7 +9,7 @@ import pytest
 import respx
 import httpx
 
-from nova3d_mcp.client import Nova3DClient, Nova3DError, Nova3DCreditsError
+from nova3d_mcp.client import Nova3DClient, Nova3DError, Nova3DCreditsError, Nova3DAuthError
 from nova3d_mcp.models import GenerationResult, WorkflowState
 
 
@@ -199,3 +199,60 @@ def test_recoverable_errors():
     assert _is_recoverable("sign in again") is False
     assert _is_recoverable("budget was exhausted") is False
     assert _is_recoverable("invalid api key") is False
+
+
+from nova3d_mcp.client import _parse_auth_error
+
+
+def test_parse_auth_error_revoked():
+    resp = httpx.Response(401, json={
+        "detail": {"code": "api_key_revoked", "message": "Key revoked."}
+    })
+    code, message = _parse_auth_error(resp)
+    assert code == "api_key_revoked"
+    assert "revoked" in message.lower()
+    assert "nova3d.xyz" in message
+
+
+def test_parse_auth_error_invalid_key():
+    resp = httpx.Response(401, json={
+        "detail": {"code": "invalid_api_key", "message": "Bad key."}
+    })
+    code, message = _parse_auth_error(resp)
+    assert code == "invalid_api_key"
+    assert "invalid" in message.lower()
+    assert "nova3d.xyz" in message
+
+
+def test_parse_auth_error_detail_string():
+    resp = httpx.Response(401, json={"detail": "Not authenticated"})
+    code, message = _parse_auth_error(resp)
+    assert code is None
+    assert message == "Not authenticated"
+
+
+def test_parse_auth_error_no_json():
+    resp = httpx.Response(401, content=b"Unauthorized")
+    code, message = _parse_auth_error(resp)
+    assert code is None
+    assert "nova3d.xyz" in message
+
+
+@pytest.mark.asyncio
+async def test_generate_raises_auth_error_with_code(mock_api):
+    mock_api.get("/workflow/readiness/sketch_to_3d").mock(
+        return_value=httpx.Response(200, json=_readiness_ok())
+    )
+    mock_api.post("/run/state/sketch_to_3d").mock(
+        return_value=httpx.Response(401, json={
+            "detail": {"code": "api_key_revoked", "message": "Revoked."}
+        })
+    )
+    async with Nova3DClient(token=FAKE_TOKEN, base_url=BASE_URL) as client:
+        with pytest.raises(Nova3DAuthError, match="revoked"):
+            await client.generate(
+                prompt="a robot",
+                provider="google",
+                llm="gemini-2.0-flash",
+                api_key="n3d_test",
+            )

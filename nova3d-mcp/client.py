@@ -378,11 +378,8 @@ class Nova3DClient:
 
     def _handle_response(self, resp: httpx.Response) -> Dict[str, Any]:
         if resp.status_code == 401:
-            raise Nova3DAuthError(
-                "Nova3D rejected the authentication token. "
-                "Please sign in again and update your NOVA3D_TOKEN.",
-                status_code=401,
-            )
+            _, message = _parse_auth_error(resp)
+            raise Nova3DAuthError(message, status_code=401)
         if resp.status_code == 402:
             detail = ""
             try:
@@ -420,3 +417,40 @@ def _is_recoverable(error_message: str) -> bool:
     if "sign in" in msg or "token" in msg or "budget" in msg:
         return False
     return any(signal in msg for signal in RECOVERABLE_ERROR_SIGNALS)
+
+
+def _parse_auth_error(resp: httpx.Response) -> tuple[Optional[str], str]:
+    """Parse a 401 response body for structured error code and user-facing message."""
+    try:
+        body = resp.json()
+        detail = body.get("detail")
+        if isinstance(detail, dict):
+            code = detail.get("code")
+            msg = detail.get("message", "")
+            return code, _auth_message_for_code(code, msg)
+        if isinstance(detail, str) and detail:
+            return None, detail
+    except Exception:
+        pass
+    return None, (
+        "Nova3D authentication failed. "
+        "Check your NOVA3D_TOKEN at nova3d.xyz → Settings → API Keys."
+    )
+
+
+def _auth_message_for_code(code: Optional[str], backend_message: str) -> str:
+    if code == "api_key_revoked":
+        return (
+            "Your NOVA3D_TOKEN has been revoked. "
+            "Create a new key at nova3d.xyz → Settings → API Keys."
+        )
+    if code == "invalid_api_key":
+        return (
+            "Your NOVA3D_TOKEN is invalid. "
+            "Check or create a key at nova3d.xyz → Settings → API Keys."
+        )
+    return (
+        backend_message
+        or "Nova3D authentication failed. "
+           "Check your NOVA3D_TOKEN at nova3d.xyz → Settings → API Keys."
+    )
