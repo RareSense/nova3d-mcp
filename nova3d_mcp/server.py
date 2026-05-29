@@ -171,6 +171,7 @@ async def generate_3d(
         "code_artifact": result.code_artifact,
         "model_artifact": result.model_artifact,
         "workflow_id": result.workflow_id,
+        "api_key_source": result.api_key_source,
         "failed": False,
     }
 
@@ -243,6 +244,7 @@ async def regenerate_part(
         "parts": result.parts,
         "code_artifact": result.code_artifact,
         "workflow_id": result.workflow_id,
+        "api_key_source": result.api_key_source,
         "failed": False,
     }
 
@@ -309,6 +311,7 @@ async def add_part(
         "parts": result.parts,
         "code_artifact": result.code_artifact,
         "workflow_id": result.workflow_id,
+        "api_key_source": result.api_key_source,
         "failed": False,
     }
 
@@ -385,6 +388,7 @@ async def articulate_model(
         "joint_count": result.joint_count,
         "code_artifact": result.code_artifact,
         "workflow_id": result.workflow_id,
+        "api_key_source": result.api_key_source,
         "failed": False,
     }
 

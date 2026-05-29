@@ -50,13 +50,16 @@ Or with pip:
 pip install nova3d-mcp
 ```
 
-### 2. Configure
+### 2. Get an API key
 
-Get your Nova3D token from [nova3d.xyz](https://nova3d.xyz) → Settings.
+Sign in at [nova3d.xyz](https://nova3d.xyz), go to **Settings → API Keys**, and create a key.
 
 ```bash
-export NOVA3D_TOKEN="your-nova3d-jwt-token"
+export NOVA3D_TOKEN="n3d_your-api-key-here"
 ```
+
+API keys never expire unless revoked. The MCP server validates your key on startup
+and prints a clear error if it's missing or invalid.
 
 ### 3. Add to Claude Code
 
@@ -67,7 +70,7 @@ export NOVA3D_TOKEN="your-nova3d-jwt-token"
       "command": "uvx",
       "args": ["nova3d-mcp"],
       "env": {
-        "NOVA3D_TOKEN": "your-nova3d-jwt-token"
+        "NOVA3D_TOKEN": "n3d_your-api-key-here"
       }
     }
   }
@@ -210,7 +213,7 @@ Check the status of a running workflow by ID.
 
 | Variable | Required | Description |
 |---|---|---|
-| `NOVA3D_TOKEN` | ✓ | JWT from nova3d.xyz Settings |
+| `NOVA3D_TOKEN` | ✓ | API key from nova3d.xyz → Settings → API Keys (recommended) or session JWT |
 | `NOVA3D_API_URL` | | Override API base URL (default: `https://nova3d.xyz/api`) |
 
 ---
