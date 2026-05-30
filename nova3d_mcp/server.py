@@ -21,13 +21,14 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
-from typing import Any, Dict, List, Optional
+from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp.server import Context
 
 from nova3d_mcp.client import Nova3DClient, Nova3DAuthError, Nova3DError
-from nova3d_mcp.models import PROVIDER_DEFAULT_MODELS
+from nova3d_mcp.models import PROVIDER_DEFAULT_MODELS, WorkflowStatus
 
 load_dotenv()
 
@@ -108,7 +109,54 @@ async def _validate_startup() -> None:
         print(_startup_error, file=sys.stderr)
 
 
+# ── Progress helper ───────────────────────────────────────────────────────────
+
+def _make_progress_callback(
+    ctx: Optional[Context],
+) -> Callable[[WorkflowStatus], Awaitable[None]]:
+    """Return an async on_progress callback that reports each newly completed node."""
+    seen: set = set()
+    counter: List[int] = [0]
+
+    async def on_progress(status: WorkflowStatus) -> None:
+        node = status.last_exit_node or status.current_node
+        if not node or node in seen:
+            return
+        seen.add(node)
+        counter[0] += 1
+        if ctx:
+            await ctx.report_progress(
+                progress=counter[0],
+                total=None,
+                message=f"Completed: {node}",
+            )
+
+    return on_progress
+
+
 # ── Tools ─────────────────────────────────────────────────────────────────────
+
+@mcp.tool()
+async def nova3d_setup() -> Dict[str, Any]:
+    """
+    Get setup instructions for Nova3D.
+
+    Call this if the user asks how to get started, needs an API key,
+    or hasn't configured NOVA3D_TOKEN yet.
+
+    Returns:
+        instructions: Step-by-step setup guide with URL and install command.
+    """
+    instructions = (
+        "To use Nova3D you need two things:\n"
+        "1. A Nova3D API key — get one at https://nova3d.xyz/settings → API Keys\n"
+        "2. A BYOK provider key (Google, Anthropic, or OpenAI) — passed as "
+        "`api_key` in each tool call.\n\n"
+        "Once you have your Nova3D API key, run:\n"
+        "claude mcp add nova3d -e NOVA3D_TOKEN=n3d_your-key -- uvx nova3d-mcp"
+    )
+    return {"instructions": instructions}
+
 
 @mcp.tool()
 async def generate_3d(
@@ -118,6 +166,7 @@ async def generate_3d(
     llm: Optional[str] = None,
     image_base64: Optional[str] = None,
     image_mime: Optional[str] = None,
+    ctx: Optional[Context] = None,
 ) -> Dict[str, Any]:
     """
     Generate a structured, part-aware 3D asset from a text prompt.
@@ -176,6 +225,7 @@ async def generate_3d(
             image_base64=image_base64,
             image_mime=image_mime,
             conversation_id=conversation_id,
+            on_progress=_make_progress_callback(ctx),
         )
 
     if result.failed:
@@ -215,6 +265,7 @@ async def regenerate_part(
     provider: str,
     api_key: str,
     llm: Optional[str] = None,
+    ctx: Optional[Context] = None,
 ) -> Dict[str, Any]:
     """
     Regenerate a specific named part within an existing 3D asset.
@@ -261,6 +312,7 @@ async def regenerate_part(
             provider=provider,
             llm=resolved_llm,
             api_key=api_key,
+            on_progress=_make_progress_callback(ctx),
         )
 
     if result.failed:
@@ -289,6 +341,7 @@ async def add_part(
     provider: str,
     api_key: str,
     llm: Optional[str] = None,
+    ctx: Optional[Context] = None,
 ) -> Dict[str, Any]:
     """
     Add a new named part to an existing 3D asset.
@@ -330,6 +383,7 @@ async def add_part(
             provider=provider,
             llm=resolved_llm,
             api_key=api_key,
+            on_progress=_make_progress_callback(ctx),
         )
 
     if result.failed:
@@ -360,6 +414,7 @@ async def articulate_model(
     api_key: str,
     llm: Optional[str] = None,
     selected_meshes: Optional[List[str]] = None,
+    ctx: Optional[Context] = None,
 ) -> Dict[str, Any]:
     """
     Add joints, hinges, or rotational articulation to an existing 3D asset.
@@ -408,6 +463,7 @@ async def articulate_model(
             llm=resolved_llm,
             api_key=api_key,
             selected_meshes=selected_meshes,
+            on_progress=_make_progress_callback(ctx),
         )
 
     if result.failed:
