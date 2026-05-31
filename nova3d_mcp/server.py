@@ -226,9 +226,12 @@ async def generate_3d(
         code_artifact: Blender Python construction script. Pass this to
                        regenerate_part, add_part, or articulate_model.
         model_artifact: GLB artifact object. Pass to articulate_model.
-        workflow_id:   Workflow identifier for status tracking.
-        failed:        True if generation failed.
-        error_message: Human-readable error if failed is True.
+        workflow_id:       Workflow identifier for status tracking.
+        conversation_url:  Browser URL for the editing session on nova3d.xyz.
+                           All regenerate/edit calls on this asset link here too.
+                           Open this to see the full generation history for this asset.
+        failed:            True if generation failed.
+        error_message:     Human-readable error if failed is True.
     """
     if _startup_error:
         return {"failed": True, "error_message": _startup_error}
@@ -317,12 +320,15 @@ async def regenerate_part(
         llm:           Model identifier. Defaults to provider's recommended model.
 
     Returns:
-        glb_url:       Updated GLB with the regenerated part.
-        preview_url:   Browser preview URL for the updated asset.
-        code_artifact: Updated construction script for further edits.
-        workflow_id:   Workflow identifier.
-        failed:        True if regeneration failed.
-        error_message: Human-readable error if failed is True.
+        glb_url:           Updated GLB with the regenerated part.
+        preview_url:       Browser preview URL for the updated asset.
+        code_artifact:     Updated construction script for further edits.
+        workflow_id:       Workflow identifier.
+        conversation_url:  Browser URL for the editing session. Present only if
+                           the original generate_3d call successfully created a
+                           conversation. Same URL as returned by generate_3d.
+        failed:            True if regeneration failed.
+        error_message:     Human-readable error if failed is True.
     """
     if _startup_error:
         return {"failed": True, "error_message": _startup_error}
@@ -394,13 +400,16 @@ async def add_part(
         llm:           Model identifier. Defaults to provider's recommended model.
 
     Returns:
-        glb_url:       Updated GLB with the new part added.
-        preview_url:   Browser preview URL showing the expanded asset.
-        parts:         Updated list of part names including the new part.
-        code_artifact: Updated construction script for further edits.
-        workflow_id:   Workflow identifier.
-        failed:        True if the add operation failed.
-        error_message: Human-readable error if failed is True.
+        glb_url:           Updated GLB with the new part added.
+        preview_url:       Browser preview URL showing the expanded asset.
+        parts:             Updated list of part names including the new part.
+        code_artifact:     Updated construction script for further edits.
+        workflow_id:       Workflow identifier.
+        conversation_url:  Browser URL for the editing session. Present only if
+                           the original generate_3d call successfully created a
+                           conversation. Same URL as returned by generate_3d.
+        failed:            True if the add operation failed.
+        error_message:     Human-readable error if failed is True.
     """
     if _startup_error:
         return {"failed": True, "error_message": _startup_error}
@@ -477,14 +486,17 @@ async def articulate_model(
                               from the articulation_request.
 
     Returns:
-        glb_url:       Updated GLB with joint definitions embedded.
-        preview_url:   Browser preview URL where articulation can be tested.
-        joints:        List of joint definition objects.
-        joint_count:   Number of joints added.
-        code_artifact: Updated construction script.
-        workflow_id:   Workflow identifier.
-        failed:        True if articulation failed.
-        error_message: Human-readable error if failed is True.
+        glb_url:           Updated GLB with joint definitions embedded.
+        preview_url:       Browser preview URL where articulation can be tested.
+        joints:            List of joint definition objects.
+        joint_count:       Number of joints added.
+        code_artifact:     Updated construction script.
+        workflow_id:       Workflow identifier.
+        conversation_url:  Browser URL for the editing session. Present only if
+                           the original generate_3d call successfully created a
+                           conversation. Same URL as returned by generate_3d.
+        failed:            True if articulation failed.
+        error_message:     Human-readable error if failed is True.
     """
     if _startup_error:
         return {"failed": True, "error_message": _startup_error}
