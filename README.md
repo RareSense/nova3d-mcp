@@ -111,6 +111,7 @@ The agent calls `generate_3d`. You get back:
 {
   "glb_url": "https://nova3d.xyz/assets/abc123.glb",
   "preview_url": "https://nova3d.xyz/preview/state-...",
+  "conversation_url": "https://nova3d.xyz/chat/conv-...",
   "parts": ["door", "glass_panel", "coin_slot", "button_grid", "frame", "shelf_1", "shelf_2"],
   "joint_count": 1,
   "code_artifact": { ... },
@@ -118,8 +119,8 @@ The agent calls `generate_3d`. You get back:
 }
 ```
 
-Open `preview_url` in your browser — interactive Three.js viewer, named parts,
-orbit controls, part explosion. No Blender required to preview.
+- **`preview_url`** — interactive Three.js viewer with named parts, orbit controls, and part explosion. No Blender required.
+- **`conversation_url`** — your editing session on nova3d.xyz. Open this to see the full generation and edit history for this asset. All subsequent `regenerate_part`, `add_part`, and `articulate_model` calls on this asset link back to the same session.
 
 ---
 
@@ -137,6 +138,8 @@ Generate a structured 3D asset from text (and optional reference image).
 | `llm` | string | | Model ID. Defaults to recommended per provider. |
 | `image_base64` | string | | Reference image as plain base64 |
 | `image_mime` | string | | e.g. `"image/jpeg"` |
+
+**Returns:** `glb_url`, `preview_url`, `conversation_url`, `parts`, `joint_count`, `code_artifact`, `model_artifact`, `workflow_id`. Pass `code_artifact` to any edit tool. Open `conversation_url` to see the full edit history for this asset on nova3d.xyz.
 
 ---
 
@@ -202,17 +205,23 @@ Check the status of a running workflow by ID.
 
 ```
 1. generate_3d("robot dog with four legs, head, torso, and tail")
-   → glb_url, preview_url, parts, code_artifact
+   → glb_url, preview_url, conversation_url, parts, code_artifact
 
 2. Open preview_url in browser
    → see named parts, identify what needs changing
+   Open conversation_url to see the full session on nova3d.xyz
 
 3. regenerate_part(code_artifact, part_type="head", description="...")
-   → updated glb_url, new preview_url
+   → updated glb_url, new preview_url, same conversation_url
 
-4. articulate_model(code_artifact, model_url, "make legs rotate at hip joints")
+4. add_part(code_artifact, description="a wagging tail with three segments")
+   → updated glb_url, parts list now includes new tail segments
+
+5. articulate_model(code_artifact, model_url, "make legs rotate at hip joints")
    → glb_url with working joints
 ```
+
+All edit tools accept the `code_artifact` from any prior result and return an updated one. Always pass the most recent `code_artifact` forward — it carries the session state that links your edits together.
 
 ---
 
