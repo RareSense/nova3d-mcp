@@ -94,6 +94,9 @@ async def test_generate_3d_proceeds_when_no_startup_error(monkeypatch):
         mock.get("/workflow/readiness/sketch_to_3d").mock(
             return_value=httpx.Response(401, json={"detail": {"code": "invalid_api_key", "message": "bad key"}})
         )
+        mock.post("/conversations").mock(
+            return_value=httpx.Response(201, json={"id": "conv-test"})
+        )
         from nova3d_mcp.client import Nova3DAuthError
         with pytest.raises(Nova3DAuthError):
             await server_module.generate_3d(prompt="a chair", provider="google", api_key="fake")
@@ -174,3 +177,5 @@ async def test_generate_3d_conversation_failure_does_not_block_generation(monkey
     assert result["failed"] is False
     assert "conversation_url" not in result
     assert "_nova3d_conversation_id" not in result.get("code_artifact", {})
+    mock_client.generate.assert_called_once()
+    assert mock_client.generate.call_args.kwargs["conversation_id"] is None
