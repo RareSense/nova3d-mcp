@@ -5,6 +5,7 @@ Unit tests for Nova3DClient.
 Uses respx to mock HTTP without hitting the real API.
 ────────────────────────────────────────────────────────────────
 """
+import json
 import pytest
 import respx
 import httpx
@@ -488,25 +489,23 @@ async def test_generate_sends_conversation_id(mock_api):
         return_value=httpx.Response(200, json=_result_ok())
     )
 
-    import nova3d_mcp.client as client_module
-    original_sleep = client_module.asyncio.sleep
-    client_module.asyncio.sleep = lambda _: original_sleep(0)
+    async with Nova3DClient(token=FAKE_TOKEN, base_url=BASE_URL) as client:
+        import nova3d_mcp.client as client_module
+        original_sleep = client_module.asyncio.sleep
+        client_module.asyncio.sleep = lambda _: original_sleep(0)
 
-    try:
-        async with Nova3DClient(token=FAKE_TOKEN, base_url=BASE_URL) as client:
-            await client.generate(
-                prompt="a toaster",
-                provider="google",
-                llm="gemini-2.0-flash",
-                api_key="AIza-test",
-                conversation_id="conv-abc123",
-            )
-    finally:
+        await client.generate(
+            prompt="a toaster",
+            provider="google",
+            llm="gemini-2.0-flash",
+            api_key="AIza-test",
+            conversation_id="conv-abc123",
+        )
+
         client_module.asyncio.sleep = original_sleep
 
     assert len(captured_requests) == 1
-    import json as json_lib
-    parsed = json_lib.loads(captured_requests[0].content)
+    parsed = json.loads(captured_requests[0].content)
     assert parsed["conversation"]["conversation_id"] == "conv-abc123"
     assert parsed["conversation"]["relation_type"] == "triggered_by"
 
@@ -531,21 +530,19 @@ async def test_generate_omits_conversation_when_none(mock_api):
         return_value=httpx.Response(200, json=_result_ok())
     )
 
-    import nova3d_mcp.client as client_module
-    original_sleep = client_module.asyncio.sleep
-    client_module.asyncio.sleep = lambda _: original_sleep(0)
+    async with Nova3DClient(token=FAKE_TOKEN, base_url=BASE_URL) as client:
+        import nova3d_mcp.client as client_module
+        original_sleep = client_module.asyncio.sleep
+        client_module.asyncio.sleep = lambda _: original_sleep(0)
 
-    try:
-        async with Nova3DClient(token=FAKE_TOKEN, base_url=BASE_URL) as client:
-            await client.generate(
-                prompt="a toaster",
-                provider="google",
-                llm="gemini-2.0-flash",
-                api_key="AIza-test",
-            )
-    finally:
+        await client.generate(
+            prompt="a toaster",
+            provider="google",
+            llm="gemini-2.0-flash",
+            api_key="AIza-test",
+        )
+
         client_module.asyncio.sleep = original_sleep
 
-    import json as json_lib
-    parsed = json_lib.loads(captured_requests[0].content)
+    parsed = json.loads(captured_requests[0].content)
     assert "conversation" not in parsed
