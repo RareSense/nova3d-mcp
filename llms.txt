@@ -2,7 +2,7 @@
 
 > Structured, part-aware 3D generation for AI agents and developers.
 
-Nova3D generates 3D assets where every component is a named, separately editable mesh — not a fused blob. It runs a hosted pipeline: an LLM writes Blender Python construction code, headless Blender executes and validates it, and the result is a structured GLB with intact hierarchy, named parts, and real joint definitions.
+Nova3D generates 3D assets where every component is a named, separately editable mesh - not a fused blob. It runs a hosted pipeline: an LLM writes Blender Python construction code, headless Blender executes and validates it, and the result is a structured GLB with intact hierarchy, named parts, and real joint definitions.
 
 ## What makes it different
 
@@ -16,35 +16,35 @@ Nova3D is available as an MCP (Model Context Protocol) server. Install it with:
 claude mcp add nova3d -e NOVA3D_TOKEN=n3d_your-key -- uvx nova3d-mcp
 ```
 
-Get an API key at: https://nova3d.xyz/settings → API Keys
+Get an API key at: https://nova3d.xyz/settings -> API Keys
 
 Full documentation and source: https://github.com/RareSense/nova3d-mcp
 
 ## Tools available via MCP
 
-- `nova3d_setup` — get setup instructions if the user hasn't configured a token yet
-- `generate_3d` — generate a structured GLB from a text prompt or reference image; returns glb_url, preview_url, conversation_url, named parts list, and code_artifact
-- `regenerate_part` — replace one named part without rebuilding the whole asset
-- `add_part` — add a new component to an existing asset
-- `articulate_model` — add joints, hinges, or rotational articulation to an existing asset
-- `get_generation_status` — check the status of a running workflow by ID
+- `nova3d_setup` - get setup instructions if the user hasn't configured a token yet
+- `generate_3d` - generate a structured GLB from a text prompt or reference image; returns glb_url, preview_url, conversation_url, named parts list, and code_artifact
+- `regenerate_part` - replace one named part without rebuilding the whole asset
+- `add_part` - add a new component to an existing asset
+- `articulate_model` - add joints, hinges, or rotational articulation to an existing asset
+- `get_generation_status` - check the status of a running workflow by ID
 
 ## Workflow pattern
 
 ```
-generate_3d(prompt) → glb_url, preview_url, conversation_url, parts, code_artifact
-regenerate_part(code_artifact, part_type, description) → updated asset
-add_part(code_artifact, description) → asset with new component
-articulate_model(code_artifact, model_url, articulation_request) → asset with joints
+generate_3d(prompt) -> glb_url, preview_url, conversation_url, parts, code_artifact
+regenerate_part(code_artifact, part_type, description) -> updated asset
+add_part(code_artifact, description) -> asset with new component
+articulate_model(code_artifact, model_url, articulation_request) -> asset with joints
 ```
 
-Always pass the `code_artifact` from the most recent result into the next edit call — it carries session state. The `conversation_url` returned by `generate_3d` links to a browser-based view of the full generation and edit history on nova3d.xyz; surface it to the user.
+Always pass the `code_artifact` from the most recent result into the next edit call - it carries session state. The `conversation_url` returned by `generate_3d` links to a browser-based view of the full generation and edit history on nova3d.xyz; surface it to the user.
 
 ## Authentication
 
 Nova3D requires:
-1. `NOVA3D_TOKEN` — a Nova3D API key (set in MCP server config)
-2. A BYOK provider key for the LLM — Google (recommended), Anthropic, or OpenAI — passed as `api_key` in each tool call
+1. `NOVA3D_TOKEN` - a Nova3D API key (set in MCP server config)
+2. A BYOK provider key for the LLM - Google (recommended), Anthropic, or OpenAI - passed as `api_key` in each tool call
 
 The server automatically selects a recommended default model for each provider. Pass an explicit `llm` parameter to override.
 
