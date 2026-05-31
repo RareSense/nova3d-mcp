@@ -136,6 +136,7 @@ class Nova3DClient:
         api_key: str,
         image_base64: Optional[str] = None,
         image_mime: Optional[str] = None,
+        conversation_id: Optional[str] = None,
         on_progress: Optional[Callable[[WorkflowStatus], Awaitable[None]]] = None,
     ) -> GenerationResult:
         """
@@ -161,6 +162,7 @@ class Nova3DClient:
             workflow=WORKFLOW_SKETCH_TO_3D,
             payload=payload,
             return_node="sketch_to_3d_generator",
+            conversation_id=conversation_id,
         )
         return await self._poll_and_collect(workflow_id, on_progress=on_progress)
 
@@ -172,6 +174,7 @@ class Nova3DClient:
         provider: str,
         llm: str,
         api_key: str,
+        conversation_id: Optional[str] = None,
         on_progress: Optional[Callable[[WorkflowStatus], Awaitable[None]]] = None,
     ) -> GenerationResult:
         """Regenerate a specific named part within an existing asset."""
@@ -192,6 +195,7 @@ class Nova3DClient:
             workflow=WORKFLOW_REGENERATE_PART,
             payload=payload,
             return_node="regenerate_3d_part",
+            conversation_id=conversation_id,
         )
         return await self._poll_and_collect(workflow_id, on_progress=on_progress)
 
@@ -202,6 +206,7 @@ class Nova3DClient:
         provider: str,
         llm: str,
         api_key: str,
+        conversation_id: Optional[str] = None,
         on_progress: Optional[Callable[[WorkflowStatus], Awaitable[None]]] = None,
     ) -> GenerationResult:
         """Add a new part to an existing asset."""
@@ -219,6 +224,7 @@ class Nova3DClient:
             workflow=WORKFLOW_ADD_PART,
             payload=payload,
             return_node="add_3d_part",
+            conversation_id=conversation_id,
         )
         return await self._poll_and_collect(workflow_id, on_progress=on_progress)
 
@@ -231,6 +237,7 @@ class Nova3DClient:
         llm: str,
         api_key: str,
         selected_meshes: Optional[list] = None,
+        conversation_id: Optional[str] = None,
         on_progress: Optional[Callable[[WorkflowStatus], Awaitable[None]]] = None,
     ) -> GenerationResult:
         """Add joints, hinges, or rotation to an existing asset."""
@@ -249,6 +256,7 @@ class Nova3DClient:
             workflow=WORKFLOW_ARTICULATE,
             payload=payload,
             return_node="articulate_3d_model",
+            conversation_id=conversation_id,
         )
         return await self._poll_and_collect(workflow_id, on_progress=on_progress)
 
@@ -294,16 +302,23 @@ class Nova3DClient:
         workflow: str,
         payload: Dict[str, Any],
         return_node: str,
+        conversation_id: Optional[str] = None,
     ) -> str:
         """Submit a workflow and return the workflow_id."""
         workflow_id = make_workflow_id()
+        body: Dict[str, Any] = {
+            "payload": payload,
+            "return_nodes": [return_node],
+        }
+        if conversation_id:
+            body["conversation"] = {
+                "conversation_id": conversation_id,
+                "relation_type": "triggered_by",
+            }
         try:
             resp = await self._post(
                 f"/run/state/{workflow}",
-                json={
-                    "payload": payload,
-                    "return_nodes": [return_node],
-                },
+                json=body,
                 params={"request_id": workflow_id},
                 timeout=START_TIMEOUT_SECONDS,
             )
