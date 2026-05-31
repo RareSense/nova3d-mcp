@@ -162,6 +162,12 @@ async def generate_3d(
     base_url = _get_api_url()
 
     async with Nova3DClient(token=token, base_url=base_url) as client:
+        conversation_id: Optional[str] = None
+        try:
+            conversation_id = await client.create_conversation(title=prompt[:100])
+        except Exception as e:
+            print(f"Nova3D: conversation creation failed (generation will proceed): {e}", file=sys.stderr)
+
         result = await client.generate(
             prompt=prompt,
             provider=provider,
@@ -169,6 +175,7 @@ async def generate_3d(
             api_key=api_key,
             image_base64=image_base64,
             image_mime=image_mime,
+            conversation_id=conversation_id,
         )
 
     if result.failed:
@@ -179,18 +186,25 @@ async def generate_3d(
             "retryable": result.retryable,
         }
 
-    return {
+    code_artifact = dict(result.code_artifact) if result.code_artifact else {}
+    if conversation_id:
+        code_artifact["_nova3d_conversation_id"] = conversation_id
+
+    response: Dict[str, Any] = {
         "glb_url": result.glb_url,
         "preview_url": result.preview_url,
         "parts": result.parts,
         "joint_count": result.joint_count,
         "joints": result.joints,
-        "code_artifact": result.code_artifact,
+        "code_artifact": code_artifact,
         "model_artifact": result.model_artifact,
         "workflow_id": result.workflow_id,
         "api_key_source": result.api_key_source,
         "failed": False,
     }
+    if conversation_id:
+        response["conversation_url"] = f"{base_url.removesuffix('/api')}/chat/{conversation_id}"
+    return response
 
 
 @mcp.tool()
