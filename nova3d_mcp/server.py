@@ -21,13 +21,14 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
-from typing import Any, Dict, List, Optional
+from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp.server import Context
 
 from nova3d_mcp.client import Nova3DClient, Nova3DAuthError, Nova3DError
-from nova3d_mcp.models import PROVIDER_DEFAULT_MODELS
+from nova3d_mcp.models import PROVIDER_DEFAULT_MODELS, WorkflowStatus
 
 load_dotenv()
 
@@ -108,7 +109,80 @@ async def _validate_startup() -> None:
         print(_startup_error, file=sys.stderr)
 
 
+# ── Progress helper ───────────────────────────────────────────────────────────
+
+def _make_progress_callback(
+    ctx: Optional[Context],
+) -> Callable[[WorkflowStatus], Awaitable[None]]:
+    """Return an async on_progress callback that reports each newly completed node."""
+    seen: set = set()
+    counter: List[int] = [0]
+
+    async def on_progress(status: WorkflowStatus) -> None:
+        node = status.last_exit_node or status.current_node
+        if not node or node in seen:
+            return
+        seen.add(node)
+        counter[0] += 1
+        if ctx:
+            await ctx.report_progress(
+                progress=counter[0],
+                total=None,
+                message=f"Completed: {node}",
+            )
+
+    return on_progress
+
+
+# ── Conversation linking helpers ──────────────────────────────────────────────
+
+def _extract_conversation_id(code_artifact: Optional[Dict[str, Any]]) -> Optional[str]:
+    if not isinstance(code_artifact, dict):
+        return None
+    return code_artifact.get("_nova3d_conversation_id") or None
+
+
+def _embed_conversation_id(
+    code_artifact: Optional[Dict[str, Any]],
+    conversation_id: Optional[str],
+) -> Optional[Dict[str, Any]]:
+    if code_artifact is None:
+        return None
+    result = dict(code_artifact)
+    if conversation_id:
+        result["_nova3d_conversation_id"] = conversation_id
+    return result
+
+
+def _conversation_url(base_url: str, conversation_id: Optional[str]) -> Optional[str]:
+    if not conversation_id:
+        return None
+    return f"{base_url.removesuffix('/api')}/chat/{conversation_id}"
+
+
 # ── Tools ─────────────────────────────────────────────────────────────────────
+
+@mcp.tool()
+async def nova3d_setup() -> Dict[str, Any]:
+    """
+    Get setup instructions for Nova3D.
+
+    Call this if the user asks how to get started, needs an API key,
+    or hasn't configured NOVA3D_TOKEN yet.
+
+    Returns:
+        instructions: Step-by-step setup guide with URL and install command.
+    """
+    instructions = (
+        "To use Nova3D you need two things:\n"
+        "1. A Nova3D API key — get one at https://nova3d.xyz/settings → API Keys\n"
+        "2. A BYOK provider key (Google, Anthropic, or OpenAI) — passed as "
+        "`api_key` in each tool call.\n\n"
+        "Once you have your Nova3D API key, run:\n"
+        "claude mcp add nova3d -e NOVA3D_TOKEN=n3d_your-key -- uvx nova3d-mcp"
+    )
+    return {"instructions": instructions}
+
 
 @mcp.tool()
 async def generate_3d(
@@ -118,6 +192,7 @@ async def generate_3d(
     llm: Optional[str] = None,
     image_base64: Optional[str] = None,
     image_mime: Optional[str] = None,
+    ctx: Optional[Context] = None,
 ) -> Dict[str, Any]:
     """
     Generate a structured, part-aware 3D asset from a text prompt.
@@ -151,9 +226,12 @@ async def generate_3d(
         code_artifact: Blender Python construction script. Pass this to
                        regenerate_part, add_part, or articulate_model.
         model_artifact: GLB artifact object. Pass to articulate_model.
-        workflow_id:   Workflow identifier for status tracking.
-        failed:        True if generation failed.
-        error_message: Human-readable error if failed is True.
+        workflow_id:       Workflow identifier for status tracking.
+        conversation_url:  Browser URL for the editing session on nova3d.xyz.
+                           All regenerate/edit calls on this asset link here too.
+                           Open this to see the full generation history for this asset.
+        failed:            True if generation failed.
+        error_message:     Human-readable error if failed is True.
     """
     if _startup_error:
         return {"failed": True, "error_message": _startup_error}
@@ -162,6 +240,12 @@ async def generate_3d(
     base_url = _get_api_url()
 
     async with Nova3DClient(token=token, base_url=base_url) as client:
+        conversation_id: Optional[str] = None
+        try:
+            conversation_id = await client.create_conversation(title=prompt[:100])
+        except Exception as e:
+            print(f"Nova3D: conversation creation failed (generation will proceed): {e}", file=sys.stderr)
+
         result = await client.generate(
             prompt=prompt,
             provider=provider,
@@ -169,6 +253,8 @@ async def generate_3d(
             api_key=api_key,
             image_base64=image_base64,
             image_mime=image_mime,
+            conversation_id=conversation_id,
+            on_progress=_make_progress_callback(ctx),
         )
 
     if result.failed:
@@ -179,18 +265,25 @@ async def generate_3d(
             "retryable": result.retryable,
         }
 
-    return {
+    code_artifact = dict(result.code_artifact) if result.code_artifact else {}
+    if conversation_id:
+        code_artifact["_nova3d_conversation_id"] = conversation_id
+
+    response: Dict[str, Any] = {
         "glb_url": result.glb_url,
         "preview_url": result.preview_url,
         "parts": result.parts,
         "joint_count": result.joint_count,
         "joints": result.joints,
-        "code_artifact": result.code_artifact,
+        "code_artifact": code_artifact,
         "model_artifact": result.model_artifact,
         "workflow_id": result.workflow_id,
         "api_key_source": result.api_key_source,
         "failed": False,
     }
+    if conversation_id:
+        response["conversation_url"] = f"{base_url.removesuffix('/api')}/chat/{conversation_id}"
+    return response
 
 
 @mcp.tool()
@@ -201,6 +294,7 @@ async def regenerate_part(
     provider: str,
     api_key: str,
     llm: Optional[str] = None,
+    ctx: Optional[Context] = None,
 ) -> Dict[str, Any]:
     """
     Regenerate a specific named part within an existing 3D asset.
@@ -226,18 +320,22 @@ async def regenerate_part(
         llm:           Model identifier. Defaults to provider's recommended model.
 
     Returns:
-        glb_url:       Updated GLB with the regenerated part.
-        preview_url:   Browser preview URL for the updated asset.
-        code_artifact: Updated construction script for further edits.
-        workflow_id:   Workflow identifier.
-        failed:        True if regeneration failed.
-        error_message: Human-readable error if failed is True.
+        glb_url:           Updated GLB with the regenerated part.
+        preview_url:       Browser preview URL for the updated asset.
+        code_artifact:     Updated construction script for further edits.
+        workflow_id:       Workflow identifier.
+        conversation_url:  Browser URL for the editing session. Present only if
+                           the original generate_3d call successfully created a
+                           conversation. Same URL as returned by generate_3d.
+        failed:            True if regeneration failed.
+        error_message:     Human-readable error if failed is True.
     """
     if _startup_error:
         return {"failed": True, "error_message": _startup_error}
     resolved_llm = llm or PROVIDER_DEFAULT_MODELS.get(provider, "gemini-2.0-flash")
     token = _get_token()
     base_url = _get_api_url()
+    conversation_id = _extract_conversation_id(code_artifact)
 
     async with Nova3DClient(token=token, base_url=base_url) as client:
         result = await client.regenerate_part(
@@ -247,6 +345,8 @@ async def regenerate_part(
             provider=provider,
             llm=resolved_llm,
             api_key=api_key,
+            conversation_id=conversation_id,
+            on_progress=_make_progress_callback(ctx),
         )
 
     if result.failed:
@@ -257,15 +357,19 @@ async def regenerate_part(
             "retryable": result.retryable,
         }
 
-    return {
+    response: Dict[str, Any] = {
         "glb_url": result.glb_url,
         "preview_url": result.preview_url,
         "parts": result.parts,
-        "code_artifact": result.code_artifact,
+        "code_artifact": _embed_conversation_id(result.code_artifact, conversation_id),
         "workflow_id": result.workflow_id,
         "api_key_source": result.api_key_source,
         "failed": False,
     }
+    conv_url = _conversation_url(base_url, conversation_id)
+    if conv_url:
+        response["conversation_url"] = conv_url
+    return response
 
 
 @mcp.tool()
@@ -275,6 +379,7 @@ async def add_part(
     provider: str,
     api_key: str,
     llm: Optional[str] = None,
+    ctx: Optional[Context] = None,
 ) -> Dict[str, Any]:
     """
     Add a new named part to an existing 3D asset.
@@ -295,19 +400,23 @@ async def add_part(
         llm:           Model identifier. Defaults to provider's recommended model.
 
     Returns:
-        glb_url:       Updated GLB with the new part added.
-        preview_url:   Browser preview URL showing the expanded asset.
-        parts:         Updated list of part names including the new part.
-        code_artifact: Updated construction script for further edits.
-        workflow_id:   Workflow identifier.
-        failed:        True if the add operation failed.
-        error_message: Human-readable error if failed is True.
+        glb_url:           Updated GLB with the new part added.
+        preview_url:       Browser preview URL showing the expanded asset.
+        parts:             Updated list of part names including the new part.
+        code_artifact:     Updated construction script for further edits.
+        workflow_id:       Workflow identifier.
+        conversation_url:  Browser URL for the editing session. Present only if
+                           the original generate_3d call successfully created a
+                           conversation. Same URL as returned by generate_3d.
+        failed:            True if the add operation failed.
+        error_message:     Human-readable error if failed is True.
     """
     if _startup_error:
         return {"failed": True, "error_message": _startup_error}
     resolved_llm = llm or PROVIDER_DEFAULT_MODELS.get(provider, "gemini-2.0-flash")
     token = _get_token()
     base_url = _get_api_url()
+    conversation_id = _extract_conversation_id(code_artifact)
 
     async with Nova3DClient(token=token, base_url=base_url) as client:
         result = await client.add_part(
@@ -316,6 +425,8 @@ async def add_part(
             provider=provider,
             llm=resolved_llm,
             api_key=api_key,
+            conversation_id=conversation_id,
+            on_progress=_make_progress_callback(ctx),
         )
 
     if result.failed:
@@ -326,15 +437,19 @@ async def add_part(
             "retryable": result.retryable,
         }
 
-    return {
+    response: Dict[str, Any] = {
         "glb_url": result.glb_url,
         "preview_url": result.preview_url,
         "parts": result.parts,
-        "code_artifact": result.code_artifact,
+        "code_artifact": _embed_conversation_id(result.code_artifact, conversation_id),
         "workflow_id": result.workflow_id,
         "api_key_source": result.api_key_source,
         "failed": False,
     }
+    conv_url = _conversation_url(base_url, conversation_id)
+    if conv_url:
+        response["conversation_url"] = conv_url
+    return response
 
 
 @mcp.tool()
@@ -346,6 +461,7 @@ async def articulate_model(
     api_key: str,
     llm: Optional[str] = None,
     selected_meshes: Optional[List[str]] = None,
+    ctx: Optional[Context] = None,
 ) -> Dict[str, Any]:
     """
     Add joints, hinges, or rotational articulation to an existing 3D asset.
@@ -370,20 +486,24 @@ async def articulate_model(
                               from the articulation_request.
 
     Returns:
-        glb_url:       Updated GLB with joint definitions embedded.
-        preview_url:   Browser preview URL where articulation can be tested.
-        joints:        List of joint definition objects.
-        joint_count:   Number of joints added.
-        code_artifact: Updated construction script.
-        workflow_id:   Workflow identifier.
-        failed:        True if articulation failed.
-        error_message: Human-readable error if failed is True.
+        glb_url:           Updated GLB with joint definitions embedded.
+        preview_url:       Browser preview URL where articulation can be tested.
+        joints:            List of joint definition objects.
+        joint_count:       Number of joints added.
+        code_artifact:     Updated construction script.
+        workflow_id:       Workflow identifier.
+        conversation_url:  Browser URL for the editing session. Present only if
+                           the original generate_3d call successfully created a
+                           conversation. Same URL as returned by generate_3d.
+        failed:            True if articulation failed.
+        error_message:     Human-readable error if failed is True.
     """
     if _startup_error:
         return {"failed": True, "error_message": _startup_error}
     resolved_llm = llm or PROVIDER_DEFAULT_MODELS.get(provider, "gemini-2.0-flash")
     token = _get_token()
     base_url = _get_api_url()
+    conversation_id = _extract_conversation_id(code_artifact)
 
     async with Nova3DClient(token=token, base_url=base_url) as client:
         result = await client.articulate_model(
@@ -394,6 +514,8 @@ async def articulate_model(
             llm=resolved_llm,
             api_key=api_key,
             selected_meshes=selected_meshes,
+            conversation_id=conversation_id,
+            on_progress=_make_progress_callback(ctx),
         )
 
     if result.failed:
@@ -404,16 +526,20 @@ async def articulate_model(
             "retryable": result.retryable,
         }
 
-    return {
+    response: Dict[str, Any] = {
         "glb_url": result.glb_url,
         "preview_url": result.preview_url,
         "joints": result.joints,
         "joint_count": result.joint_count,
-        "code_artifact": result.code_artifact,
+        "code_artifact": _embed_conversation_id(result.code_artifact, conversation_id),
         "workflow_id": result.workflow_id,
         "api_key_source": result.api_key_source,
         "failed": False,
     }
+    conv_url = _conversation_url(base_url, conversation_id)
+    if conv_url:
+        response["conversation_url"] = conv_url
+    return response
 
 
 @mcp.tool()

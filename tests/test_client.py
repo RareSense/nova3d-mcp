@@ -5,6 +5,7 @@ Unit tests for Nova3DClient.
 Uses respx to mock HTTP without hitting the real API.
 ────────────────────────────────────────────────────────────────
 """
+import json
 import pytest
 import respx
 import httpx
@@ -286,6 +287,54 @@ async def test_get_me_invalid_key(mock_api):
             await client.get_me()
 
 
+@pytest.mark.asyncio
+async def test_create_conversation_success(mock_api):
+    mock_api.post("/conversations").mock(
+        return_value=httpx.Response(201, json={
+            "id": "conv-abc123",
+            "tenant_id": "ten_abc",
+            "user_id": "user-1",
+            "source": "mcp",
+            "kind": "generation",
+            "status": "open",
+            "title": "a toaster with removable tray",
+            "external_conversation_id": None,
+            "conversation_metadata": None,
+            "created_at": "2026-05-30T12:00:00Z",
+            "updated_at": "2026-05-30T12:00:00Z",
+            "last_message_at": None,
+        })
+    )
+
+    async with Nova3DClient(token=FAKE_TOKEN, base_url=BASE_URL) as client:
+        conv_id = await client.create_conversation(title="a toaster with removable tray")
+
+    assert conv_id == "conv-abc123"
+
+
+@pytest.mark.asyncio
+async def test_create_conversation_auth_error(mock_api):
+    mock_api.post("/conversations").mock(
+        return_value=httpx.Response(401, json={
+            "detail": {"code": "invalid_api_key", "message": "Bad key."}
+        })
+    )
+
+    async with Nova3DClient(token="n3d_bad", base_url=BASE_URL) as client:
+        with pytest.raises(Nova3DAuthError):
+            await client.create_conversation(title="a robot")
+
+
+@pytest.mark.asyncio
+async def test_create_conversation_missing_id_raises(mock_api):
+    mock_api.post("/conversations").mock(
+        return_value=httpx.Response(201, json={"source": "mcp", "kind": "generation"})
+    )
+    async with Nova3DClient(token=FAKE_TOKEN, base_url=BASE_URL) as client:
+        with pytest.raises(Nova3DError, match="did not return an ID"):
+            await client.create_conversation(title="a robot")
+
+
 def test_result_parsing_api_key_source_present():
     data = {
         "sketch_to_3d_generator": [
@@ -418,3 +467,82 @@ def test_result_parsing_parts_api_field_takes_precedence():
     }
     result = GenerationResult.from_api(data, WORKFLOW_ID)
     assert result.parts == ["door", "frame"]
+
+
+@pytest.mark.asyncio
+async def test_generate_sends_conversation_id(mock_api):
+    """When conversation_id is provided, _start_workflow includes it in the request body."""
+    captured_requests = []
+
+    def capture_and_respond(request, route):
+        captured_requests.append(request)
+        return httpx.Response(202, json=_start_ok())
+
+    mock_api.get("/workflow/readiness/sketch_to_3d").mock(
+        return_value=httpx.Response(200, json=_readiness_ok())
+    )
+    mock_api.post("/run/state/sketch_to_3d").mock(side_effect=capture_and_respond)
+    mock_api.get(f"/status/{WORKFLOW_ID}").mock(
+        return_value=httpx.Response(200, json=_status_completed())
+    )
+    mock_api.get(f"/result/{WORKFLOW_ID}").mock(
+        return_value=httpx.Response(200, json=_result_ok())
+    )
+
+    async with Nova3DClient(token=FAKE_TOKEN, base_url=BASE_URL) as client:
+        import nova3d_mcp.client as client_module
+        original_sleep = client_module.asyncio.sleep
+        client_module.asyncio.sleep = lambda _: original_sleep(0)
+
+        await client.generate(
+            prompt="a toaster",
+            provider="google",
+            llm="gemini-2.0-flash",
+            api_key="AIza-test",
+            conversation_id="conv-abc123",
+        )
+
+        client_module.asyncio.sleep = original_sleep
+
+    assert len(captured_requests) == 1
+    parsed = json.loads(captured_requests[0].content)
+    assert parsed["conversation"]["conversation_id"] == "conv-abc123"
+    assert parsed["conversation"]["relation_type"] == "triggered_by"
+
+
+@pytest.mark.asyncio
+async def test_generate_omits_conversation_when_none(mock_api):
+    """When no conversation_id, the conversation key is absent from the request body."""
+    captured_requests = []
+
+    def capture_and_respond(request, route):
+        captured_requests.append(request)
+        return httpx.Response(202, json=_start_ok())
+
+    mock_api.get("/workflow/readiness/sketch_to_3d").mock(
+        return_value=httpx.Response(200, json=_readiness_ok())
+    )
+    mock_api.post("/run/state/sketch_to_3d").mock(side_effect=capture_and_respond)
+    mock_api.get(f"/status/{WORKFLOW_ID}").mock(
+        return_value=httpx.Response(200, json=_status_completed())
+    )
+    mock_api.get(f"/result/{WORKFLOW_ID}").mock(
+        return_value=httpx.Response(200, json=_result_ok())
+    )
+
+    async with Nova3DClient(token=FAKE_TOKEN, base_url=BASE_URL) as client:
+        import nova3d_mcp.client as client_module
+        original_sleep = client_module.asyncio.sleep
+        client_module.asyncio.sleep = lambda _: original_sleep(0)
+
+        await client.generate(
+            prompt="a toaster",
+            provider="google",
+            llm="gemini-2.0-flash",
+            api_key="AIza-test",
+        )
+
+        client_module.asyncio.sleep = original_sleep
+
+    parsed = json.loads(captured_requests[0].content)
+    assert "conversation" not in parsed
