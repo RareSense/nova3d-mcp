@@ -9,6 +9,8 @@ import json
 import pytest
 import respx
 import httpx
+from nova3d_mcp.client import _parse_auth_error
+from nova3d_mcp.server import _validate_startup
 
 from nova3d_mcp.client import Nova3DClient, Nova3DError, Nova3DCreditsError, Nova3DAuthError
 from nova3d_mcp.models import GenerationResult, WorkflowState
@@ -202,8 +204,6 @@ def test_recoverable_errors():
     assert _is_recoverable("invalid api key") is False
 
 
-from nova3d_mcp.client import _parse_auth_error
-
 
 def test_parse_auth_error_revoked():
     resp = httpx.Response(401, json={
@@ -358,8 +358,6 @@ def test_result_parsing_api_key_source_absent():
 
 
 # ── Startup validation tests ──────────────────────────────────────────────────
-
-from nova3d_mcp.server import _validate_startup
 
 
 @pytest.mark.asyncio
