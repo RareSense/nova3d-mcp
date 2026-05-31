@@ -324,6 +324,16 @@ async def test_create_conversation_auth_error(mock_api):
             await client.create_conversation(title="a robot")
 
 
+@pytest.mark.asyncio
+async def test_create_conversation_missing_id_raises(mock_api):
+    mock_api.post("/conversations").mock(
+        return_value=httpx.Response(201, json={"source": "mcp", "kind": "generation"})
+    )
+    async with Nova3DClient(token=FAKE_TOKEN, base_url=BASE_URL) as client:
+        with pytest.raises(Nova3DError, match="did not return an ID"):
+            await client.create_conversation(title="a robot")
+
+
 def test_result_parsing_api_key_source_present():
     data = {
         "sketch_to_3d_generator": [
