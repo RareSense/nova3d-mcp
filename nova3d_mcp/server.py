@@ -134,6 +134,32 @@ def _make_progress_callback(
     return on_progress
 
 
+# ── Conversation linking helpers ──────────────────────────────────────────────
+
+def _extract_conversation_id(code_artifact: Optional[Dict[str, Any]]) -> Optional[str]:
+    if not isinstance(code_artifact, dict):
+        return None
+    return code_artifact.get("_nova3d_conversation_id") or None
+
+
+def _embed_conversation_id(
+    code_artifact: Optional[Dict[str, Any]],
+    conversation_id: Optional[str],
+) -> Optional[Dict[str, Any]]:
+    if code_artifact is None:
+        return None
+    result = dict(code_artifact)
+    if conversation_id:
+        result["_nova3d_conversation_id"] = conversation_id
+    return result
+
+
+def _conversation_url(base_url: str, conversation_id: Optional[str]) -> Optional[str]:
+    if not conversation_id:
+        return None
+    return f"{base_url.removesuffix('/api')}/chat/{conversation_id}"
+
+
 # ── Tools ─────────────────────────────────────────────────────────────────────
 
 @mcp.tool()
@@ -303,6 +329,7 @@ async def regenerate_part(
     resolved_llm = llm or PROVIDER_DEFAULT_MODELS.get(provider, "gemini-2.0-flash")
     token = _get_token()
     base_url = _get_api_url()
+    conversation_id = _extract_conversation_id(code_artifact)
 
     async with Nova3DClient(token=token, base_url=base_url) as client:
         result = await client.regenerate_part(
@@ -312,6 +339,7 @@ async def regenerate_part(
             provider=provider,
             llm=resolved_llm,
             api_key=api_key,
+            conversation_id=conversation_id,
             on_progress=_make_progress_callback(ctx),
         )
 
@@ -323,15 +351,19 @@ async def regenerate_part(
             "retryable": result.retryable,
         }
 
-    return {
+    response: Dict[str, Any] = {
         "glb_url": result.glb_url,
         "preview_url": result.preview_url,
         "parts": result.parts,
-        "code_artifact": result.code_artifact,
+        "code_artifact": _embed_conversation_id(result.code_artifact, conversation_id),
         "workflow_id": result.workflow_id,
         "api_key_source": result.api_key_source,
         "failed": False,
     }
+    conv_url = _conversation_url(base_url, conversation_id)
+    if conv_url:
+        response["conversation_url"] = conv_url
+    return response
 
 
 @mcp.tool()
@@ -375,6 +407,7 @@ async def add_part(
     resolved_llm = llm or PROVIDER_DEFAULT_MODELS.get(provider, "gemini-2.0-flash")
     token = _get_token()
     base_url = _get_api_url()
+    conversation_id = _extract_conversation_id(code_artifact)
 
     async with Nova3DClient(token=token, base_url=base_url) as client:
         result = await client.add_part(
@@ -383,6 +416,7 @@ async def add_part(
             provider=provider,
             llm=resolved_llm,
             api_key=api_key,
+            conversation_id=conversation_id,
             on_progress=_make_progress_callback(ctx),
         )
 
@@ -394,15 +428,19 @@ async def add_part(
             "retryable": result.retryable,
         }
 
-    return {
+    response: Dict[str, Any] = {
         "glb_url": result.glb_url,
         "preview_url": result.preview_url,
         "parts": result.parts,
-        "code_artifact": result.code_artifact,
+        "code_artifact": _embed_conversation_id(result.code_artifact, conversation_id),
         "workflow_id": result.workflow_id,
         "api_key_source": result.api_key_source,
         "failed": False,
     }
+    conv_url = _conversation_url(base_url, conversation_id)
+    if conv_url:
+        response["conversation_url"] = conv_url
+    return response
 
 
 @mcp.tool()
@@ -453,6 +491,7 @@ async def articulate_model(
     resolved_llm = llm or PROVIDER_DEFAULT_MODELS.get(provider, "gemini-2.0-flash")
     token = _get_token()
     base_url = _get_api_url()
+    conversation_id = _extract_conversation_id(code_artifact)
 
     async with Nova3DClient(token=token, base_url=base_url) as client:
         result = await client.articulate_model(
@@ -463,6 +502,7 @@ async def articulate_model(
             llm=resolved_llm,
             api_key=api_key,
             selected_meshes=selected_meshes,
+            conversation_id=conversation_id,
             on_progress=_make_progress_callback(ctx),
         )
 
@@ -474,16 +514,20 @@ async def articulate_model(
             "retryable": result.retryable,
         }
 
-    return {
+    response: Dict[str, Any] = {
         "glb_url": result.glb_url,
         "preview_url": result.preview_url,
         "joints": result.joints,
         "joint_count": result.joint_count,
-        "code_artifact": result.code_artifact,
+        "code_artifact": _embed_conversation_id(result.code_artifact, conversation_id),
         "workflow_id": result.workflow_id,
         "api_key_source": result.api_key_source,
         "failed": False,
     }
+    conv_url = _conversation_url(base_url, conversation_id)
+    if conv_url:
+        response["conversation_url"] = conv_url
+    return response
 
 
 @mcp.tool()

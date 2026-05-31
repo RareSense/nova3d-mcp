@@ -183,6 +183,111 @@ async def test_generate_3d_conversation_failure_does_not_block_generation(monkey
     assert mock_client.generate.call_args.kwargs["conversation_id"] is None
 
 
+# ── Edit tool conversation propagation tests ──────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_regenerate_part_propagates_conversation_id(monkeypatch):
+    monkeypatch.setenv("NOVA3D_TOKEN", "n3d_testkey")
+    monkeypatch.setenv("NOVA3D_API_URL", "https://nova3d.xyz/api")
+
+    fake_result = MagicMock()
+    fake_result.failed = False
+    fake_result.glb_url = "https://nova3d.xyz/assets/abc.glb"
+    fake_result.preview_url = "https://nova3d.xyz/preview/wf-456"
+    fake_result.parts = ["body", "door"]
+    fake_result.code_artifact = {"content": "import bpy # updated"}
+    fake_result.workflow_id = "wf-456"
+    fake_result.api_key_source = "request"
+
+    mock_client = AsyncMock()
+    mock_client.regenerate_part = AsyncMock(return_value=fake_result)
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=None)
+
+    with patch("nova3d_mcp.server.Nova3DClient", return_value=mock_client):
+        result = await server_module.regenerate_part(
+            code_artifact={"content": "import bpy", "_nova3d_conversation_id": "conv-xyz"},
+            part_type="door",
+            description="glass door with chrome frame",
+            provider="google",
+            api_key="AIza-test",
+        )
+
+    assert result["failed"] is False
+    assert result["conversation_url"] == "https://nova3d.xyz/chat/conv-xyz"
+    assert result["code_artifact"]["_nova3d_conversation_id"] == "conv-xyz"
+    call_kwargs = mock_client.regenerate_part.call_args.kwargs
+    assert call_kwargs["conversation_id"] == "conv-xyz"
+
+
+@pytest.mark.asyncio
+async def test_regenerate_part_no_conversation_id_in_artifact(monkeypatch):
+    monkeypatch.setenv("NOVA3D_TOKEN", "n3d_testkey")
+    monkeypatch.setenv("NOVA3D_API_URL", "https://nova3d.xyz/api")
+
+    fake_result = MagicMock()
+    fake_result.failed = False
+    fake_result.glb_url = "https://nova3d.xyz/assets/abc.glb"
+    fake_result.preview_url = "https://nova3d.xyz/preview/wf-456"
+    fake_result.parts = ["body"]
+    fake_result.code_artifact = {"content": "import bpy"}
+    fake_result.workflow_id = "wf-456"
+    fake_result.api_key_source = "request"
+
+    mock_client = AsyncMock()
+    mock_client.regenerate_part = AsyncMock(return_value=fake_result)
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=None)
+
+    with patch("nova3d_mcp.server.Nova3DClient", return_value=mock_client):
+        result = await server_module.regenerate_part(
+            code_artifact={"content": "import bpy"},
+            part_type="door",
+            description="glass door",
+            provider="google",
+            api_key="AIza-test",
+        )
+
+    assert result["failed"] is False
+    assert "conversation_url" not in result
+    assert "_nova3d_conversation_id" not in result.get("code_artifact", {})
+    call_kwargs = mock_client.regenerate_part.call_args.kwargs
+    assert call_kwargs.get("conversation_id") is None
+
+
+@pytest.mark.asyncio
+async def test_add_part_propagates_conversation_id(monkeypatch):
+    monkeypatch.setenv("NOVA3D_TOKEN", "n3d_testkey")
+    monkeypatch.setenv("NOVA3D_API_URL", "https://nova3d.xyz/api")
+
+    fake_result = MagicMock()
+    fake_result.failed = False
+    fake_result.glb_url = "https://nova3d.xyz/assets/abc.glb"
+    fake_result.preview_url = "https://nova3d.xyz/preview/wf-789"
+    fake_result.parts = ["body", "handle"]
+    fake_result.code_artifact = {"content": "import bpy # with handle"}
+    fake_result.workflow_id = "wf-789"
+    fake_result.api_key_source = "request"
+
+    mock_client = AsyncMock()
+    mock_client.add_part = AsyncMock(return_value=fake_result)
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=None)
+
+    with patch("nova3d_mcp.server.Nova3DClient", return_value=mock_client):
+        result = await server_module.add_part(
+            code_artifact={"content": "import bpy", "_nova3d_conversation_id": "conv-xyz"},
+            description="a chrome handle bar",
+            provider="google",
+            api_key="AIza-test",
+        )
+
+    assert result["conversation_url"] == "https://nova3d.xyz/chat/conv-xyz"
+    assert result["code_artifact"]["_nova3d_conversation_id"] == "conv-xyz"
+    call_kwargs = mock_client.add_part.call_args.kwargs
+    assert call_kwargs["conversation_id"] == "conv-xyz"
+
+
 # ── nova3d_setup tests ────────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
