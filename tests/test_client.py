@@ -286,6 +286,44 @@ async def test_get_me_invalid_key(mock_api):
             await client.get_me()
 
 
+@pytest.mark.asyncio
+async def test_create_conversation_success(mock_api):
+    mock_api.post("/conversations").mock(
+        return_value=httpx.Response(201, json={
+            "id": "conv-abc123",
+            "tenant_id": "ten_abc",
+            "user_id": "user-1",
+            "source": "mcp",
+            "kind": "generation",
+            "status": "open",
+            "title": "a toaster with removable tray",
+            "external_conversation_id": None,
+            "conversation_metadata": None,
+            "created_at": "2026-05-30T12:00:00Z",
+            "updated_at": "2026-05-30T12:00:00Z",
+            "last_message_at": None,
+        })
+    )
+
+    async with Nova3DClient(token=FAKE_TOKEN, base_url=BASE_URL) as client:
+        conv_id = await client.create_conversation(title="a toaster with removable tray")
+
+    assert conv_id == "conv-abc123"
+
+
+@pytest.mark.asyncio
+async def test_create_conversation_auth_error(mock_api):
+    mock_api.post("/conversations").mock(
+        return_value=httpx.Response(401, json={
+            "detail": {"code": "invalid_api_key", "message": "Bad key."}
+        })
+    )
+
+    async with Nova3DClient(token="n3d_bad", base_url=BASE_URL) as client:
+        with pytest.raises(Nova3DAuthError):
+            await client.create_conversation(title="a robot")
+
+
 def test_result_parsing_api_key_source_present():
     data = {
         "sketch_to_3d_generator": [
