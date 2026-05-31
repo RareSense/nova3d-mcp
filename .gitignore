@@ -9,3 +9,5 @@ build/
 *.egg-link
 *.pth
 .env
+.claude/
+docs/superpowers/
