@@ -36,13 +36,20 @@ load_dotenv()
 
 _startup_error: Optional[str] = None
 
-# ── Default models per provider ───────────────────────────────────────────────
+# ── Model options ─────────────────────────────────────────────────────────────
 
-_PROVIDER_DEFAULT_MODELS: Dict[str, str] = {
-    "google": "gemini-2.0-flash",
-    "anthropic": "claude-sonnet-4-20250514",
-    "openai": "gpt-4o",
+_MODEL_OPTIONS: Dict[str, Dict[str, str]] = {
+    "gemini":             {"provider": "gemini",    "llm": "gemini"},
+    "claude-sonnet":      {"provider": "anthropic", "llm": "claude-sonnet"},
+    "claude-opus":        {"provider": "anthropic", "llm": "claude-opus"},
+    "claude-opus-latest": {"provider": "anthropic", "llm": "claude-opus-latest"},
+    "gpt-5.5":            {"provider": "openai",    "llm": "gpt55"},
 }
+_DEFAULT_MODEL = "gemini"
+
+
+def _resolve_model(model: Optional[str]) -> Optional[Dict[str, str]]:
+    return _MODEL_OPTIONS.get((model or _DEFAULT_MODEL).strip())
 
 # ── Server init ───────────────────────────────────────────────────────────────
 
@@ -64,12 +71,11 @@ mcp = FastMCP(
         "creation failed silently at generate time; generation still succeeded.\n"
         "   - Always pass the most recent code_artifact forward — it carries session "
         "state that links edits together.\n\n"
-        "SETUP: This server requires two credentials:\n"
-        "1. NOVA3D_TOKEN — a Nova3D API key. If the user has not set this, "
+        "SETUP: This server requires one credential:\n"
+        "NOVA3D_TOKEN — a Nova3D API key. If the user has not set this, "
         "proactively tell them: 'To use Nova3D, you need an API key. "
-        "Get one at https://nova3d.xyz/settings → API Keys, then run: "
+        "Get one at https://app.nova3d.xyz/api-key, then run: "
         "claude mcp add nova3d -e NOVA3D_TOKEN=n3d_your-key -- uvx nova3d-mcp'\n"
-        "2. A BYOK provider key (Google, Anthropic, or OpenAI) passed as `api_key` in each tool call.\n"
         "\n"
         "If any tool returns {\"failed\": true}, surface the error_message to the user verbatim."
     ),
@@ -82,9 +88,9 @@ def _get_token() -> str:
     token = os.environ.get("NOVA3D_TOKEN", "").strip()
     if not token:
         raise Nova3DError(
-            "NOVA3D_TOKEN environment variable is not set. "
-            "Sign in at nova3d.xyz, copy your token from Settings, "
-            "and set it as NOVA3D_TOKEN."
+            "NOVA3D_TOKEN is not set. "
+            "Get an API key at https://app.nova3d.xyz/api-key "
+            "and add it with: claude mcp add nova3d -e NOVA3D_TOKEN=n3d_your-key -- uvx nova3d-mcp"
         )
     return token
 
@@ -101,7 +107,7 @@ async def _validate_startup() -> None:
     if not token:
         _startup_error = (
             "NOVA3D_TOKEN is not set. "
-            "Create an API key at https://nova3d.xyz/settings → API Keys, "
+            "Get an API key at https://app.nova3d.xyz/api-key, "
             "then set it as NOVA3D_TOKEN in your MCP config and restart."
         )
         print(
@@ -191,11 +197,9 @@ async def nova3d_setup() -> Dict[str, Any]:
         instructions: Step-by-step setup guide with URL and install command.
     """
     instructions = (
-        "To use Nova3D you need two things:\n"
-        "1. A Nova3D API key — get one at https://nova3d.xyz/settings → API Keys\n"
-        "2. A BYOK provider key (Google, Anthropic, or OpenAI) — passed as "
-        "`api_key` in each tool call.\n\n"
-        "Once you have your Nova3D API key, run:\n"
+        "To use Nova3D you need one thing:\n"
+        "A Nova3D API key — get one at https://app.nova3d.xyz/api-key\n\n"
+        "Once you have it, run:\n"
         "claude mcp add nova3d -e NOVA3D_TOKEN=n3d_your-key -- uvx nova3d-mcp"
     )
     return {"instructions": instructions}
@@ -204,9 +208,7 @@ async def nova3d_setup() -> Dict[str, Any]:
 @mcp.tool()
 async def generate_3d(
     prompt: str,
-    provider: str,
-    api_key: str,
-    llm: Optional[str] = None,
+    model: Optional[str] = None,
     image_base64: Optional[str] = None,
     image_mime: Optional[str] = None,
     ctx: Optional[Context] = None,
@@ -222,14 +224,8 @@ async def generate_3d(
         prompt:       Description of the 3D asset. Be specific about parts.
                       Example: "a washing machine with drum, door, control panel,
                       and hose connectors"
-        provider:     LLM provider to use. One of: "google", "anthropic", "openai".
-                      Gemini is recommended for best spatial reasoning.
-        api_key:      Your API key for the specified provider (BYOK).
-        llm:          Model identifier. Defaults to the recommended model for
-                      the provider if not specified.
-                      google → "gemini-2.0-flash"
-                      anthropic → "claude-sonnet-4-20250514"
-                      openai → "gpt-4o"
+        model:        LLM model to use. One of: "gemini" (default), "claude-sonnet",
+                      "claude-opus", "claude-opus-latest", "gpt-5.5".
         image_base64: Optional reference image as plain base64 (not a data URL).
         image_mime:   MIME type of the reference image e.g. "image/jpeg".
 
@@ -252,7 +248,10 @@ async def generate_3d(
     """
     if _startup_error:
         return {"failed": True, "error_message": _startup_error}
-    resolved_llm = llm or _PROVIDER_DEFAULT_MODELS.get(provider, "gemini-2.0-flash")
+    model_opts = _resolve_model(model)
+    if model_opts is None:
+        valid = ", ".join(_MODEL_OPTIONS)
+        return {"failed": True, "error_message": f"Invalid model '{model or _DEFAULT_MODEL}'. Valid options: {valid}"}
     token = _get_token()
     base_url = _get_api_url()
 
@@ -265,9 +264,8 @@ async def generate_3d(
 
         result = await client.generate(
             prompt=prompt,
-            provider=provider,
-            llm=resolved_llm,
-            api_key=api_key,
+            provider=model_opts["provider"],
+            llm=model_opts["llm"],
             image_base64=image_base64,
             image_mime=image_mime,
             conversation_id=conversation_id,
@@ -285,6 +283,7 @@ async def generate_3d(
     code_artifact = dict(result.code_artifact) if result.code_artifact else {}
     if conversation_id:
         code_artifact["_nova3d_conversation_id"] = conversation_id
+    code_artifact["_nova3d_prompt"] = prompt
 
     response: Dict[str, Any] = {
         "glb_url": result.glb_url,
@@ -308,9 +307,7 @@ async def regenerate_part(
     code_artifact: Dict[str, Any],
     part_type: str,
     description: str,
-    provider: str,
-    api_key: str,
-    llm: Optional[str] = None,
+    model: Optional[str] = None,
     ctx: Optional[Context] = None,
 ) -> Dict[str, Any]:
     """
@@ -332,9 +329,8 @@ async def regenerate_part(
         description:   Description of what the regenerated part should look
                        like. Be specific. Example: "glass panel door with
                        chrome frame and rubber seal around the edges".
-        provider:      LLM provider. One of: "google", "anthropic", "openai".
-        api_key:       Your API key for the specified provider (BYOK).
-        llm:           Model identifier. Defaults to provider's recommended model.
+        model:         LLM model. One of: "gemini" (default), "claude-sonnet",
+                       "claude-opus", "claude-opus-latest", "gpt-5.5".
 
     Returns:
         glb_url:           Updated GLB with the regenerated part.
@@ -349,7 +345,10 @@ async def regenerate_part(
     """
     if _startup_error:
         return {"failed": True, "error_message": _startup_error}
-    resolved_llm = llm or _PROVIDER_DEFAULT_MODELS.get(provider, "gemini-2.0-flash")
+    model_opts = _resolve_model(model)
+    if model_opts is None:
+        valid = ", ".join(_MODEL_OPTIONS)
+        return {"failed": True, "error_message": f"Invalid model '{model or _DEFAULT_MODEL}'. Valid options: {valid}"}
     token = _get_token()
     base_url = _get_api_url()
     conversation_id = _extract_conversation_id(code_artifact)
@@ -359,9 +358,8 @@ async def regenerate_part(
             code_artifact=code_artifact,
             part_type=part_type,
             description=description,
-            provider=provider,
-            llm=resolved_llm,
-            api_key=api_key,
+            provider=model_opts["provider"],
+            llm=model_opts["llm"],
             conversation_id=conversation_id,
             on_progress=_make_progress_callback(ctx),
         )
@@ -393,9 +391,7 @@ async def regenerate_part(
 async def add_part(
     code_artifact: Dict[str, Any],
     description: str,
-    provider: str,
-    api_key: str,
-    llm: Optional[str] = None,
+    model: Optional[str] = None,
     ctx: Optional[Context] = None,
 ) -> Dict[str, Any]:
     """
@@ -412,9 +408,8 @@ async def add_part(
                        shape, position relative to existing parts, and any
                        material properties. Example: "add a chrome handle bar
                        to the front face of the door, centered horizontally".
-        provider:      LLM provider. One of: "google", "anthropic", "openai".
-        api_key:       Your API key for the specified provider (BYOK).
-        llm:           Model identifier. Defaults to provider's recommended model.
+        model:         LLM model. One of: "gemini" (default), "claude-sonnet",
+                       "claude-opus", "claude-opus-latest", "gpt-5.5".
 
     Returns:
         glb_url:           Updated GLB with the new part added.
@@ -430,7 +425,10 @@ async def add_part(
     """
     if _startup_error:
         return {"failed": True, "error_message": _startup_error}
-    resolved_llm = llm or _PROVIDER_DEFAULT_MODELS.get(provider, "gemini-2.0-flash")
+    model_opts = _resolve_model(model)
+    if model_opts is None:
+        valid = ", ".join(_MODEL_OPTIONS)
+        return {"failed": True, "error_message": f"Invalid model '{model or _DEFAULT_MODEL}'. Valid options: {valid}"}
     token = _get_token()
     base_url = _get_api_url()
     conversation_id = _extract_conversation_id(code_artifact)
@@ -439,9 +437,8 @@ async def add_part(
         result = await client.add_part(
             code_artifact=code_artifact,
             description=description,
-            provider=provider,
-            llm=resolved_llm,
-            api_key=api_key,
+            provider=model_opts["provider"],
+            llm=model_opts["llm"],
             conversation_id=conversation_id,
             on_progress=_make_progress_callback(ctx),
         )
@@ -472,11 +469,10 @@ async def add_part(
 @mcp.tool()
 async def articulate_model(
     code_artifact: Dict[str, Any],
-    model_url: str,
     articulation_request: str,
-    provider: str,
-    api_key: str,
-    llm: Optional[str] = None,
+    model_url: Optional[str] = None,
+    model_artifact: Optional[Dict[str, Any]] = None,
+    model: Optional[str] = None,
     selected_meshes: Optional[List[str]] = None,
     ctx: Optional[Context] = None,
 ) -> Dict[str, Any]:
@@ -489,15 +485,17 @@ async def articulate_model(
 
     Args:
         code_artifact:        The code_artifact object from a prior generation.
-        model_url:            The glb_url from the prior generation result.
-                              Must be a direct HTTPS URL, not a blob: URL.
         articulation_request: Plain language description of the desired
                               articulation. Example: "make the drum rotate
                               around its central axis and the door swing open
                               on a hinge at the left edge".
-        provider:             LLM provider. One of: "google", "anthropic", "openai".
-        api_key:              Your API key for the specified provider (BYOK).
-        llm:                  Model identifier. Defaults to provider's recommended model.
+        model_url:            The glb_url from the prior generation result.
+                              Provide this or model_artifact (or both).
+                              Must be a direct HTTPS URL, not a blob: URL.
+        model_artifact:       The model_artifact object from the prior generation
+                              result. Provide this or model_url (or both).
+        model:                LLM model. One of: "gemini" (default), "claude-sonnet",
+                              "claude-opus", "claude-opus-latest", "gpt-5.5".
         selected_meshes:      Optional list of specific mesh names to articulate.
                               If omitted, the LLM infers which parts to articulate
                               from the articulation_request.
@@ -517,19 +515,29 @@ async def articulate_model(
     """
     if _startup_error:
         return {"failed": True, "error_message": _startup_error}
-    resolved_llm = llm or _PROVIDER_DEFAULT_MODELS.get(provider, "gemini-2.0-flash")
+    if model_url is None and model_artifact is None:
+        return {
+            "failed": True,
+            "error_message": "Provide model_url or model_artifact from the prior generate_3d result.",
+        }
+    model_opts = _resolve_model(model)
+    if model_opts is None:
+        valid = ", ".join(_MODEL_OPTIONS)
+        return {"failed": True, "error_message": f"Invalid model '{model or _DEFAULT_MODEL}'. Valid options: {valid}"}
     token = _get_token()
     base_url = _get_api_url()
     conversation_id = _extract_conversation_id(code_artifact)
+    instruction_prompt = code_artifact.get("_nova3d_prompt") if isinstance(code_artifact, dict) else None
 
     async with Nova3DClient(token=token, base_url=base_url) as client:
         result = await client.articulate_model(
             code_artifact=code_artifact,
-            model_url=model_url,
             articulation_request=articulation_request,
-            provider=provider,
-            llm=resolved_llm,
-            api_key=api_key,
+            provider=model_opts["provider"],
+            llm=model_opts["llm"],
+            model_url=model_url,
+            model_artifact=model_artifact,
+            instruction_prompt=instruction_prompt,
             selected_meshes=selected_meshes,
             conversation_id=conversation_id,
             on_progress=_make_progress_callback(ctx),
