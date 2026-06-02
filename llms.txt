@@ -16,7 +16,7 @@ Nova3D is available as an MCP (Model Context Protocol) server. Install it with:
 claude mcp add nova3d -e NOVA3D_TOKEN=n3d_your-key -- uvx nova3d-mcp
 ```
 
-Get an API key at: https://nova3d.xyz/settings -> API Keys
+Get an API key at: https://app.nova3d.xyz/api-key
 
 Full documentation and source: https://github.com/RareSense/nova3d-mcp
 
@@ -42,12 +42,8 @@ Always pass the `code_artifact` from the most recent result into the next edit c
 
 ## Authentication
 
-Nova3D requires:
-1. `NOVA3D_TOKEN` - a Nova3D API key (set in MCP server config)
-2. A BYOK provider key for the LLM - Google (recommended), Anthropic, or OpenAI - passed as `api_key` in each tool call
+Nova3D requires one credential: `NOVA3D_TOKEN` — a Nova3D API key set in your MCP server config. Get one at https://app.nova3d.xyz/api-key
 
-The server automatically selects a recommended default model for each provider. Pass an explicit `llm` parameter to override.
+## Model options
 
-## LLM providers
-
-Supported values for the `provider` parameter: `"google"`, `"anthropic"`, `"openai"`. Google Gemini is recommended for best spatial reasoning.
+Pass `model` to any generation tool. Valid values: `"gemini"` (default), `"claude-sonnet"`, `"claude-opus"`, `"claude-opus-latest"`, `"gpt-5.5"`. Omit to use Gemini.

@@ -40,7 +40,7 @@ regenerating everything.
 
 ### 1. Get an API key
 
-Sign in at [nova3d.xyz](https://nova3d.xyz), go to **Settings → API Keys**, and create a key.
+Get an API key at: https://app.nova3d.xyz/api-key
 
 ```bash
 export NOVA3D_TOKEN="n3d_your-api-key-here"
@@ -101,8 +101,7 @@ Pass a prompt like this to your AI agent:
 
 ```
 Generate a vending machine with separate door, glass panel, coin slot,
-button grid, frame, and interior shelving. Use Google Gemini with my
-API key AIza...
+button grid, frame, and interior shelving.
 ```
 
 The agent calls `generate_3d`. You get back:
@@ -133,9 +132,7 @@ Generate a structured 3D asset from text (and optional reference image).
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `prompt` | string | ✓ | Asset description. Be specific about parts. |
-| `provider` | string | ✓ | `"google"` · `"anthropic"` · `"openai"` |
-| `api_key` | string | ✓ | Your BYOK key for the provider |
-| `llm` | string | | Model ID. Defaults to recommended per provider. |
+| `model` | string | | `"gemini"` (default) · `"claude-sonnet"` · `"claude-opus"` · `"claude-opus-latest"` · `"gpt-5.5"` |
 | `image_base64` | string | | Reference image as plain base64 |
 | `image_mime` | string | | e.g. `"image/jpeg"` |
 
@@ -152,9 +149,7 @@ Regenerate one named part without rebuilding the whole asset.
 | `code_artifact` | object | ✓ | From prior `generate_3d` result |
 | `part_type` | string | ✓ | Part name e.g. `"door"`, `"handle"` |
 | `description` | string | ✓ | What the new part should look like |
-| `provider` | string | ✓ | LLM provider |
-| `api_key` | string | ✓ | BYOK key |
-| `llm` | string | | Model ID |
+| `model` | string | | `"gemini"` (default) · `"claude-sonnet"` · `"claude-opus"` · `"claude-opus-latest"` · `"gpt-5.5"` |
 
 **Finding part names:** Open the `preview_url` from your generation — each
 mesh is labeled. Use that exact name as `part_type`.
@@ -169,9 +164,7 @@ Add a new component to an existing asset.
 |---|---|---|---|
 | `code_artifact` | object | ✓ | From prior generation result |
 | `description` | string | ✓ | Description of the new part and where it goes |
-| `provider` | string | ✓ | LLM provider |
-| `api_key` | string | ✓ | BYOK key |
-| `llm` | string | | Model ID |
+| `model` | string | | `"gemini"` (default) · `"claude-sonnet"` · `"claude-opus"` · `"claude-opus-latest"` · `"gpt-5.5"` |
 
 ---
 
@@ -182,11 +175,10 @@ Add joints, hinges, or rotational articulation to an existing asset.
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `code_artifact` | object | ✓ | From prior generation result |
-| `model_url` | string | ✓ | `glb_url` from prior generation |
 | `articulation_request` | string | ✓ | What should move and how |
-| `provider` | string | ✓ | LLM provider |
-| `api_key` | string | ✓ | BYOK key |
-| `llm` | string | | Model ID |
+| `model_url` | string | | `glb_url` from prior generation. Provide this or `model_artifact`. |
+| `model_artifact` | object | | `model_artifact` from prior generation. Provide this or `model_url`. |
+| `model` | string | | `"gemini"` (default) · `"claude-sonnet"` · `"claude-opus"` · `"claude-opus-latest"` · `"gpt-5.5"` |
 | `selected_meshes` | list | | Specific mesh names to articulate |
 
 ---
@@ -225,13 +217,15 @@ All edit tools accept the `code_artifact` from any prior result and return an up
 
 ---
 
-## Provider reference
+## Model reference
 
-| Provider | `provider` | Default `llm` | Notes |
-|---|---|---|---|
-| Google Gemini | `google` | `gemini-2.0-flash` | Recommended |
-| Anthropic | `anthropic` | `claude-sonnet-4-20250514` | Strong reasoning |
-| OpenAI | `openai` | `gpt-4o` | Widely available |
+| `model` value | Provider | Notes |
+|---|---|---|
+| `"gemini"` *(default)* | Google Gemini | Recommended for spatial reasoning |
+| `"claude-sonnet"` | Anthropic | Strong reasoning |
+| `"claude-opus"` | Anthropic | Most capable Anthropic model |
+| `"claude-opus-latest"` | Anthropic | Latest Opus version |
+| `"gpt-5.5"` | OpenAI | Latest GPT model |
 
 ---
 
@@ -239,7 +233,7 @@ All edit tools accept the `code_artifact` from any prior result and return an up
 
 | Variable | Required | Description |
 |---|---|---|
-| `NOVA3D_TOKEN` | ✓ | API key from nova3d.xyz → Settings → API Keys (recommended) or session JWT |
+| `NOVA3D_TOKEN` | ✓ | API key from https://app.nova3d.xyz/api-key (recommended) or session JWT |
 | `NOVA3D_API_URL` | | Override API base URL (default: `https://nova3d.xyz/api`) |
 
 ---
