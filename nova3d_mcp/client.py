@@ -63,7 +63,7 @@ class Nova3DAuthError(Nova3DError):
 
 
 class Nova3DCreditsError(Nova3DError):
-    """Raised when the user has insufficient credits and no BYOK key."""
+    """Raised when the user has insufficient credits."""
 
 
 # ── Workflow ID ───────────────────────────────────────────────────────────────
@@ -79,12 +79,11 @@ class Nova3DClient:
     Async client for the Nova3D generation API.
 
     Usage:
-        async with Nova3DClient(token="your-jwt-token") as client:
+        async with Nova3DClient(token="n3d_your-key") as client:
             result = await client.generate(
                 prompt="a toaster with removable tray",
-                provider="google",
-                llm="gemini-2.0-flash",
-                api_key="AIza...",
+                provider="gemini",
+                llm="gemini",
             )
     """
 
@@ -132,7 +131,6 @@ class Nova3DClient:
         prompt: str,
         provider: str,
         llm: str,
-        api_key: str,
         image_base64: Optional[str] = None,
         image_mime: Optional[str] = None,
         conversation_id: Optional[str] = None,
@@ -150,7 +148,7 @@ class Nova3DClient:
             "prompt": prompt.strip(),
             "llm": llm,
             "provider": provider,
-            "api_key": api_key,
+            "validate": False,
         }
         if image_base64:
             payload["image_base64"] = image_base64
@@ -172,7 +170,6 @@ class Nova3DClient:
         description: str,
         provider: str,
         llm: str,
-        api_key: str,
         conversation_id: Optional[str] = None,
         on_progress: Optional[Callable[[WorkflowStatus], Awaitable[None]]] = None,
     ) -> GenerationResult:
@@ -188,7 +185,6 @@ class Nova3DClient:
             "part_type": part_type.strip(),
             "llm": llm,
             "provider": provider,
-            "api_key": api_key,
         }
         workflow_id = await self._start_workflow(
             workflow=WORKFLOW_REGENERATE_PART,
@@ -204,7 +200,6 @@ class Nova3DClient:
         description: str,
         provider: str,
         llm: str,
-        api_key: str,
         conversation_id: Optional[str] = None,
         on_progress: Optional[Callable[[WorkflowStatus], Awaitable[None]]] = None,
     ) -> GenerationResult:
@@ -217,7 +212,6 @@ class Nova3DClient:
             "description": description.strip(),
             "llm": llm,
             "provider": provider,
-            "api_key": api_key,
         }
         workflow_id = await self._start_workflow(
             workflow=WORKFLOW_ADD_PART,
@@ -230,11 +224,12 @@ class Nova3DClient:
     async def articulate_model(
         self,
         code_artifact: Dict[str, Any],
-        model_url: str,
         articulation_request: str,
         provider: str,
         llm: str,
-        api_key: str,
+        model_url: Optional[str] = None,
+        model_artifact: Optional[Dict[str, Any]] = None,
+        instruction_prompt: Optional[str] = None,
         selected_meshes: Optional[list] = None,
         conversation_id: Optional[str] = None,
         on_progress: Optional[Callable[[WorkflowStatus], Awaitable[None]]] = None,
@@ -242,12 +237,16 @@ class Nova3DClient:
         """Add joints, hinges, or rotation to an existing asset."""
         payload: Dict[str, Any] = {
             "code_artifact": code_artifact,
-            "model_url": model_url,
             "articulation_request": articulation_request.strip(),
             "llm": llm,
             "provider": provider,
-            "api_key": api_key,
         }
+        if model_url:
+            payload["model_url"] = model_url
+        if model_artifact:
+            payload["model_artifact"] = model_artifact
+        if instruction_prompt:
+            payload["instruction_prompt"] = instruction_prompt
         if selected_meshes:
             payload["selected_meshes"] = selected_meshes
 
@@ -421,7 +420,7 @@ class Nova3DClient:
             except Exception:
                 pass
             raise Nova3DCreditsError(
-                detail or "Add credits or provide your own provider API key to generate.",
+                detail or "Insufficient credits. Add credits at https://app.nova3d.xyz/api-key",
                 status_code=402,
             )
         if resp.status_code == 404:
@@ -467,23 +466,23 @@ def _parse_auth_error(resp: httpx.Response) -> tuple[Optional[str], str]:
         pass
     return None, (
         "Nova3D authentication failed. "
-        "Check your NOVA3D_TOKEN at nova3d.xyz → Settings → API Keys."
+        "Check your API key at https://app.nova3d.xyz/api-key"
     )
 
 
 def _auth_message_for_code(code: Optional[str], backend_message: str) -> str:
     if code == "api_key_revoked":
         return (
-            "Your NOVA3D_TOKEN has been revoked. "
-            "Create a new key at nova3d.xyz → Settings → API Keys."
+            "Your Nova3D API key has been revoked. "
+            "Create a new one at https://app.nova3d.xyz/api-key"
         )
     if code == "invalid_api_key":
         return (
-            "Your NOVA3D_TOKEN is invalid. "
-            "Check or create a key at nova3d.xyz → Settings → API Keys."
+            "Your Nova3D API key is invalid. "
+            "Check or replace it at https://app.nova3d.xyz/api-key"
         )
     return (
         backend_message
         or "Nova3D authentication failed. "
-           "Check your NOVA3D_TOKEN at nova3d.xyz → Settings → API Keys."
+           "Check your API key at https://app.nova3d.xyz/api-key"
     )

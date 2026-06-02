@@ -103,9 +103,8 @@ async def test_generate_success(mock_api):
 
         result = await client.generate(
             prompt="a toaster with removable tray",
-            provider="google",
-            llm="gemini-2.0-flash",
-            api_key="AIza-test",
+            provider="gemini",
+            llm="gemini",
         )
 
         client_module.asyncio.sleep = original_sleep
@@ -130,9 +129,8 @@ async def test_generate_not_ready(mock_api):
         with pytest.raises(Nova3DError, match="unavailable"):
             await client.generate(
                 prompt="a robot",
-                provider="google",
-                llm="gemini-2.0-flash",
-                api_key="AIza-test",
+                provider="gemini",
+                llm="gemini",
             )
 
 
@@ -152,9 +150,8 @@ async def test_generate_credits_error(mock_api):
         with pytest.raises(Nova3DCreditsError):
             await client.generate(
                 prompt="a robot",
-                provider="google",
-                llm="gemini-2.0-flash",
-                api_key="",
+                provider="gemini",
+                llm="gemini",
             )
 
 
@@ -212,7 +209,7 @@ def test_parse_auth_error_revoked():
     code, message = _parse_auth_error(resp)
     assert code == "api_key_revoked"
     assert "revoked" in message.lower()
-    assert "nova3d.xyz" in message
+    assert "app.nova3d.xyz/api-key" in message
 
 
 def test_parse_auth_error_invalid_key():
@@ -222,7 +219,7 @@ def test_parse_auth_error_invalid_key():
     code, message = _parse_auth_error(resp)
     assert code == "invalid_api_key"
     assert "invalid" in message.lower()
-    assert "nova3d.xyz" in message
+    assert "app.nova3d.xyz/api-key" in message
 
 
 def test_parse_auth_error_detail_string():
@@ -236,7 +233,7 @@ def test_parse_auth_error_no_json():
     resp = httpx.Response(401, content=b"Unauthorized")
     code, message = _parse_auth_error(resp)
     assert code is None
-    assert "nova3d.xyz" in message
+    assert "app.nova3d.xyz/api-key" in message
 
 
 @pytest.mark.asyncio
@@ -253,9 +250,8 @@ async def test_generate_raises_auth_error_with_code(mock_api):
         with pytest.raises(Nova3DAuthError, match="revoked"):
             await client.generate(
                 prompt="a robot",
-                provider="google",
-                llm="gemini-2.0-flash",
-                api_key="n3d_test",
+                provider="gemini",
+                llm="gemini",
             )
 
 
@@ -494,9 +490,8 @@ async def test_generate_sends_conversation_id(mock_api):
 
         await client.generate(
             prompt="a toaster",
-            provider="google",
-            llm="gemini-2.0-flash",
-            api_key="AIza-test",
+            provider="gemini",
+            llm="gemini",
             conversation_id="conv-abc123",
         )
 
@@ -535,9 +530,8 @@ async def test_generate_omits_conversation_when_none(mock_api):
 
         await client.generate(
             prompt="a toaster",
-            provider="google",
-            llm="gemini-2.0-flash",
-            api_key="AIza-test",
+            provider="gemini",
+            llm="gemini",
         )
 
         client_module.asyncio.sleep = original_sleep
