@@ -28,13 +28,21 @@ from mcp.server.fastmcp import FastMCP
 from mcp.server.fastmcp.server import Context
 
 from nova3d_mcp.client import Nova3DClient, Nova3DAuthError, Nova3DError
-from nova3d_mcp.models import PROVIDER_DEFAULT_MODELS, WorkflowStatus
+from nova3d_mcp.models import WorkflowStatus
 
 load_dotenv()
 
 # ── Startup error state ───────────────────────────────────────────────────────
 
 _startup_error: Optional[str] = None
+
+# ── Default models per provider ───────────────────────────────────────────────
+
+_PROVIDER_DEFAULT_MODELS: Dict[str, str] = {
+    "google": "gemini-2.0-flash",
+    "anthropic": "claude-sonnet-4-20250514",
+    "openai": "gpt-4o",
+}
 
 # ── Server init ───────────────────────────────────────────────────────────────
 
@@ -244,7 +252,7 @@ async def generate_3d(
     """
     if _startup_error:
         return {"failed": True, "error_message": _startup_error}
-    resolved_llm = llm or PROVIDER_DEFAULT_MODELS.get(provider, "gemini-2.0-flash")
+    resolved_llm = llm or _PROVIDER_DEFAULT_MODELS.get(provider, "gemini-2.0-flash")
     token = _get_token()
     base_url = _get_api_url()
 
@@ -341,7 +349,7 @@ async def regenerate_part(
     """
     if _startup_error:
         return {"failed": True, "error_message": _startup_error}
-    resolved_llm = llm or PROVIDER_DEFAULT_MODELS.get(provider, "gemini-2.0-flash")
+    resolved_llm = llm or _PROVIDER_DEFAULT_MODELS.get(provider, "gemini-2.0-flash")
     token = _get_token()
     base_url = _get_api_url()
     conversation_id = _extract_conversation_id(code_artifact)
@@ -422,7 +430,7 @@ async def add_part(
     """
     if _startup_error:
         return {"failed": True, "error_message": _startup_error}
-    resolved_llm = llm or PROVIDER_DEFAULT_MODELS.get(provider, "gemini-2.0-flash")
+    resolved_llm = llm or _PROVIDER_DEFAULT_MODELS.get(provider, "gemini-2.0-flash")
     token = _get_token()
     base_url = _get_api_url()
     conversation_id = _extract_conversation_id(code_artifact)
@@ -509,7 +517,7 @@ async def articulate_model(
     """
     if _startup_error:
         return {"failed": True, "error_message": _startup_error}
-    resolved_llm = llm or PROVIDER_DEFAULT_MODELS.get(provider, "gemini-2.0-flash")
+    resolved_llm = llm or _PROVIDER_DEFAULT_MODELS.get(provider, "gemini-2.0-flash")
     token = _get_token()
     base_url = _get_api_url()
     conversation_id = _extract_conversation_id(code_artifact)
