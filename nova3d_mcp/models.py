@@ -14,21 +14,6 @@ from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 
 
-# ── Provider / LLM reference ─────────────────────────────────────────────────
-
-class Provider(str, Enum):
-    GOOGLE = "google"
-    ANTHROPIC = "anthropic"
-    OPENAI = "openai"
-
-
-PROVIDER_DEFAULT_MODELS: Dict[str, str] = {
-    Provider.GOOGLE: "gemini-2.0-flash",
-    Provider.ANTHROPIC: "claude-sonnet-4-20250514",
-    Provider.OPENAI: "gpt-4o",
-}
-
-
 # ── Workflow state ────────────────────────────────────────────────────────────
 
 class WorkflowState(str, Enum):
@@ -397,8 +382,8 @@ def _message_for_category(
 ) -> str:
     label = provider if provider else "The selected provider"
     messages = {
-        "invalid_api_key": f"{label} rejected this API key. Check the key in settings or use another provider.",
-        "missing_api_key": f"{label} is missing an API key. Add one in settings and try again.",
+        "invalid_api_key": f"The {label} key saved in your Nova3D account is invalid. Update it at https://app.nova3d.xyz/api-key",
+        "missing_api_key": f"No {label} key found in your Nova3D account. Add one at https://app.nova3d.xyz/api-key",
         "model_access_denied": f"{label} does not allow this key to use the selected model. Choose another.",
         "unsupported_provider_for_model": f"{label} cannot run the selected model. Choose a compatible pair.",
         "insufficient_credits": f"{label} does not have enough credits for this generation.",
@@ -413,4 +398,4 @@ def _message_for_category(
         return messages[category]
     if retryable:
         return "Generation failed. Retry shortly or switch providers."
-    return "Generation failed. Try another prompt, model, or provider key."
+    return "Generation failed. Try another prompt or model."
