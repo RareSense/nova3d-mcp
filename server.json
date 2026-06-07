@@ -18,7 +18,7 @@
       "env": [
         {
           "name": "NOVA3D_TOKEN",
-          "description": "API key from nova3d.xyz → Settings → API Keys",
+          "description": "API key from https://app.nova3d.xyz/api-key",
           "required": true
         },
         {
