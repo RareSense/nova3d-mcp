@@ -137,7 +137,6 @@ RESULT_NODE_KEYS = [
 
 class GenerationResult(BaseModel):
     glb_url: Optional[str] = None
-    preview_url: Optional[str] = None
     model_artifact: Optional[Dict[str, Any]] = None
     code_artifact: Optional[Dict[str, Any]] = None
     joints_artifact: Optional[Dict[str, Any]] = None
@@ -157,7 +156,6 @@ class GenerationResult(BaseModel):
         cls,
         data: Dict[str, Any],
         workflow_id: str,
-        base_url: str = "https://nova3d.xyz",
     ) -> "GenerationResult":
         payload = _extract_generator_payload(data)
         if payload is None:
@@ -184,11 +182,8 @@ class GenerationResult(BaseModel):
         failure = _extract_failure(unwrapped)
         error_message = (failure.get("message") if failure else None) or _extract_root_error(data)
         failed = glb_url is None and (_is_failed(data) or error_message is not None)
-        preview_url = f"{base_url}/preview/{workflow_id}" if glb_url else None
-
         return cls(
             glb_url=glb_url,
-            preview_url=preview_url,
             model_artifact=model_artifact,
             code_artifact=code_artifact,
             joints_artifact=joints_artifact,

@@ -109,8 +109,7 @@ The agent calls `generate_3d`. You get back:
 ```json
 {
   "glb_url": "https://nova3d.xyz/assets/abc123.glb",
-  "preview_url": "https://nova3d.xyz/preview/state-...",
-  "conversation_url": "https://nova3d.xyz/chat/conv-...",
+  "conversation_url": "https://app.nova3d.xyz/chat/conv-...",
   "parts": ["door", "glass_panel", "coin_slot", "button_grid", "frame", "shelf_1", "shelf_2"],
   "joint_count": 1,
   "code_artifact": { ... },
@@ -118,8 +117,7 @@ The agent calls `generate_3d`. You get back:
 }
 ```
 
-- **`preview_url`** — interactive Three.js viewer with named parts, orbit controls, and part explosion. No Blender required.
-- **`conversation_url`** — your editing session on nova3d.xyz. Open this to see the full generation and edit history for this asset. All subsequent `regenerate_part`, `add_part`, and `articulate_model` calls on this asset link back to the same session.
+- **`conversation_url`** — your editing session in the Nova3D app, with the generated model and edit history already hydrated. All subsequent `regenerate_part`, `add_part`, and `articulate_model` calls on this asset link back to the same session.
 
 ---
 
@@ -136,7 +134,7 @@ Generate a structured 3D asset from text (and optional reference image).
 | `image_base64` | string | | Reference image as plain base64 |
 | `image_mime` | string | | e.g. `"image/jpeg"` |
 
-**Returns:** `glb_url`, `preview_url`, `conversation_url`, `parts`, `joint_count`, `code_artifact`, `model_artifact`, `workflow_id`. Pass `code_artifact` to any edit tool. Open `conversation_url` to see the full edit history for this asset on nova3d.xyz.
+**Returns:** `glb_url`, `conversation_url`, `parts`, `joint_count`, `code_artifact`, `model_artifact`, `workflow_id`. Pass `code_artifact` to any edit tool. Open `conversation_url` to see the full edit history for this asset in the Nova3D app.
 
 ---
 
@@ -151,8 +149,9 @@ Regenerate one named part without rebuilding the whole asset.
 | `description` | string | ✓ | What the new part should look like |
 | `model` | string | | `"gemini"` (default) · `"claude-sonnet"` · `"claude-opus"` · `"claude-opus-latest"` · `"gpt-5.5"` |
 
-**Finding part names:** Open the `preview_url` from your generation — each
-mesh is labeled. Use that exact name as `part_type`.
+**Finding part names:** Open the `conversation_url` from your generation and
+inspect the model viewer — each mesh is labeled. Use that exact name as
+`part_type`.
 
 ---
 
@@ -197,14 +196,13 @@ Check the status of a running workflow by ID.
 
 ```
 1. generate_3d("robot dog with four legs, head, torso, and tail")
-   → glb_url, preview_url, conversation_url, parts, code_artifact
+   → glb_url, conversation_url, parts, code_artifact
 
-2. Open preview_url in browser
+2. Open conversation_url in browser
    → see named parts, identify what needs changing
-   Open conversation_url to see the full session on nova3d.xyz
 
 3. regenerate_part(code_artifact, part_type="head", description="...")
-   → updated glb_url, new preview_url, same conversation_url
+   → updated glb_url, same conversation_url
 
 4. add_part(code_artifact, description="a wagging tail with three segments")
    → updated glb_url, parts list now includes new tail segments
@@ -235,6 +233,7 @@ All edit tools accept the `code_artifact` from any prior result and return an up
 |---|---|---|
 | `NOVA3D_TOKEN` | ✓ | API key from https://app.nova3d.xyz/api-key (recommended) or session JWT |
 | `NOVA3D_API_URL` | | Override API base URL (default: `https://nova3d.xyz/api`) |
+| `NOVA3D_APP_URL` | | Override app URL for conversation links (default: `https://app.nova3d.xyz`) |
 
 ---
 

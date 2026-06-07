@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-An MCP server that wraps Nova3D's hosted 3D generation API as callable tools for Claude Code and other MCP-compatible agents. Users bring their own LLM provider key (Google, Anthropic, or OpenAI) and a Nova3D JWT token.
+An MCP server that wraps Nova3D's hosted 3D generation API as callable tools for Claude Code and other MCP-compatible agents. Users authenticate with a Nova3D API key; provider key handling lives in the Nova3D account/backend flow.
 
 ## Commands
 
@@ -35,7 +35,7 @@ The source directory on disk is `nova3d_mcp/` (underscore), matching the Python 
 
 ## Architecture
 
-**Three-file package:**
+**Four-file package:**
 
 - `nova3d_mcp/server.py` — FastMCP server. Registers 5 tools (`generate_3d`, `regenerate_part`, `add_part`, `articulate_model`, `get_generation_status`). Each tool creates a `Nova3DClient` context manager, calls the matching method, and maps the result to a flat dict. Auth (`NOVA3D_TOKEN`) and base URL (`NOVA3D_API_URL`) are read from env inside each tool call.
 
@@ -43,12 +43,15 @@ The source directory on disk is `nova3d_mcp/` (underscore), matching the Python 
 
 - `nova3d_mcp/models.py` — Pydantic models. `GenerationResult.from_api()` contains all response-parsing logic — the Nova3D API response structure is nested and has multiple fallback key paths (e.g. `model_url` vs `model_artifact.url`). `WorkflowState.parse()` normalizes state strings (`"succeeded"` → `COMPLETED`, etc.) and `is_terminal` drives the polling loop.
 
+- `nova3d_mcp/conversation.py` — Pure helpers for building Flutter-compatible chat messages, conversation snapshots, and message append payloads. Keep app message schema changes here instead of scattering JSON construction through tool handlers.
+
 **Data flow for a generation:**
 ```
 tool call → _get_token() + _get_api_url()
          → Nova3DClient.__aenter__()
          → client.generate() → check_readiness() → _start_workflow() → _poll_and_collect()
          → GenerationResult.from_api(raw_dict, workflow_id)
+         → write app-compatible conversation snapshot/messages/links
          → tool returns flat dict to MCP caller
 ```
 
@@ -60,3 +63,4 @@ tool call → _get_token() + _get_api_url()
 |---|---|---|
 | `NOVA3D_TOKEN` | Yes | — |
 | `NOVA3D_API_URL` | No | `https://nova3d.xyz/api` |
+| `NOVA3D_APP_URL` | No | `https://app.nova3d.xyz` |
