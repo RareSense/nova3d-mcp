@@ -40,14 +40,14 @@ regenerating everything.
 
 | Client | Status | Install path | Preview path |
 |---|---|---|---|
-| Codex | Supported | `codex mcp add` or Codex MCP config | Browser `preview_url` |
-| Cursor | Supported | `.cursor/mcp.json` or `~/.cursor/mcp.json` | Browser `preview_url` |
-| VS Code | Supported | `.vscode/mcp.json`, MCP: Add Server, or `code --add-mcp` | Browser `preview_url` |
-| Visual Studio | Supported | `.mcp.json` or Visual Studio MCP UI | Browser `preview_url` |
-| Claude Code | Supported | `claude mcp add` | Browser `preview_url` |
+| Codex | Supported | `codex mcp add` or Codex MCP config | Browser `conversation_url` |
+| Cursor | Supported | `.cursor/mcp.json` or `~/.cursor/mcp.json` | Browser `conversation_url` |
+| VS Code | Supported | `.vscode/mcp.json`, MCP: Add Server, or `code --add-mcp` | Browser `conversation_url` |
+| Visual Studio | Supported | `.mcp.json` or Visual Studio MCP UI | Browser `conversation_url` |
+| Claude Code | Supported | `claude mcp add` | Browser `conversation_url` |
 
 Nova3D runs from your MCP client, but model inspection happens through the
-hosted browser viewer returned as `preview_url`. This repository does not
+hosted browser viewer returned as `conversation_url`. This repository does not
 currently ship an embedded IDE-native 3D viewport.
 
 ---
@@ -189,10 +189,9 @@ The agent calls `generate_3d`. You get back:
 
 ---
 
-## Preview and configuration notes
+## Configuration notes
 
-- `preview_url` is the standard supported way to inspect generated assets today.
-- `conversation_url` opens the full edit session on nova3d.xyz.
+- `conversation_url` is the standard supported way to inspect generated assets — it opens your fully hydrated editing session in the Nova3D app.
 - Keep secrets out of checked-in workspace config when possible. Prefer
   per-user configuration files or client-managed environment variables.
 - If your editor supports source-controlled MCP config, commit the server entry
@@ -207,7 +206,7 @@ The agent calls `generate_3d`. You get back:
 | `NOVA3D_TOKEN is not set` | Add `NOVA3D_TOKEN` to your MCP server environment and restart the client |
 | Auth failure on startup | Confirm the key at https://app.nova3d.xyz/api-key |
 | `uvx` not found | Install `uv` or use a local `nova3d-mcp` executable from a virtualenv |
-| No 3D preview inside the editor | Open the returned `preview_url` in the browser; that is the supported preview path |
+| No 3D preview inside the editor | Open the returned `conversation_url` in the browser; that is the supported preview path |
 
 ---
 
