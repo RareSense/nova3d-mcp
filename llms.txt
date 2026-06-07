@@ -23,7 +23,7 @@ Full documentation and source: https://github.com/RareSense/nova3d-mcp
 ## Tools available via MCP
 
 - `nova3d_setup` - get setup instructions if the user hasn't configured a token yet
-- `generate_3d` - generate a structured GLB from a text prompt or reference image; returns glb_url, preview_url, conversation_url, named parts list, and code_artifact
+- `generate_3d` - generate a structured GLB from a text prompt or reference image; returns glb_url, conversation_url, named parts list, and code_artifact
 - `regenerate_part` - replace one named part without rebuilding the whole asset
 - `add_part` - add a new component to an existing asset
 - `articulate_model` - add joints, hinges, or rotational articulation to an existing asset
@@ -32,17 +32,19 @@ Full documentation and source: https://github.com/RareSense/nova3d-mcp
 ## Workflow pattern
 
 ```
-generate_3d(prompt) -> glb_url, preview_url, conversation_url, parts, code_artifact
+generate_3d(prompt) -> glb_url, conversation_url, parts, code_artifact
 regenerate_part(code_artifact, part_type, description) -> updated asset
 add_part(code_artifact, description) -> asset with new component
 articulate_model(code_artifact, model_url, articulation_request) -> asset with joints
 ```
 
-Always pass the `code_artifact` from the most recent result into the next edit call - it carries session state. The `conversation_url` returned by `generate_3d` links to a browser-based view of the full generation and edit history on nova3d.xyz; surface it to the user.
+Always pass the `code_artifact` from the most recent result into the next edit call - it carries session state. The `conversation_url` returned by `generate_3d` links to a browser-based view of the full generation and edit history in the Nova3D app; surface it to the user.
 
 ## Authentication
 
 Nova3D requires one credential: `NOVA3D_TOKEN` — a Nova3D API key set in your MCP server config. Get one at https://app.nova3d.xyz/api-key
+
+Set `NOVA3D_APP_URL` if conversation links should open a local or self-hosted client instead of `https://app.nova3d.xyz`.
 
 ## Model options
 

@@ -20,6 +20,11 @@
           "name": "NOVA3D_TOKEN",
           "description": "API key from nova3d.xyz → Settings → API Keys",
           "required": true
+        },
+        {
+          "name": "NOVA3D_APP_URL",
+          "description": "App URL used for conversation links, for example https://app.nova3d.xyz or http://127.0.0.1:5555",
+          "required": false
         }
       ]
     }

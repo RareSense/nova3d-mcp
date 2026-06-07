@@ -13,6 +13,10 @@ from typing import Any, Awaitable, Callable, Dict, Optional
 
 import httpx
 
+from nova3d_mcp.conversation import (
+    build_snapshot_metadata,
+    remote_message_payload,
+)
 from nova3d_mcp.models import (
     GenerationReadiness,
     GenerationResult,
@@ -22,7 +26,6 @@ from nova3d_mcp.models import (
 # ── Constants ─────────────────────────────────────────────────────────────────
 
 NOVA3D_API_BASE = "https://nova3d.xyz/api"
-NOVA3D_PREVIEW_BASE = "https://nova3d.xyz/preview"
 
 WORKFLOW_SKETCH_TO_3D = "sketch_to_3d"
 WORKFLOW_REGENERATE_PART = "regenerate_3d_part"
@@ -91,11 +94,9 @@ class Nova3DClient:
         self,
         token: str,
         base_url: str = NOVA3D_API_BASE,
-        preview_base: str = NOVA3D_PREVIEW_BASE,
     ):
         self._token = token
         self._base_url = base_url.rstrip("/")
-        self._preview_base = preview_base.rstrip("/")
         self._http: Optional[httpx.AsyncClient] = None
 
     async def __aenter__(self) -> "Nova3DClient":
@@ -269,7 +270,7 @@ class Nova3DClient:
             f"/result/{workflow_id}",
             timeout=RESULT_TIMEOUT_SECONDS,
         )
-        return GenerationResult.from_api(resp, workflow_id, self._preview_base.replace("/preview", ""))
+        return GenerationResult.from_api(resp, workflow_id)
 
     async def get_me(self) -> Dict[str, Any]:
         """Verify credentials and return user identity from GET /me."""
@@ -290,8 +291,60 @@ class Nova3DClient:
             raise Nova3DError("Conversation creation did not return an ID.")
         return str(conv_id)
 
-    def preview_url(self, workflow_id: str) -> str:
-        return f"{self._preview_base}/{workflow_id}"
+    async def update_conversation_snapshot(
+        self,
+        conversation_id: str,
+        *,
+        title: str,
+        messages: list[Dict[str, Any]],
+    ) -> None:
+        """Persist the app-compatible chat snapshot on the conversation."""
+        await self._patch(
+            f"/conversations/{conversation_id}",
+            json={
+                "title": title[:255],
+                "kind": "generation",
+                "conversation_metadata": build_snapshot_metadata(messages),
+            },
+        )
+
+    async def append_conversation_message(
+        self,
+        conversation_id: str,
+        message: Dict[str, Any],
+    ) -> str:
+        """Append one app-compatible message and return the remote message ID."""
+        resp = await self._post(
+            f"/conversations/{conversation_id}/messages",
+            json=remote_message_payload(message),
+        )
+        message_id = resp.get("id")
+        if not message_id:
+            raise Nova3DError("Conversation message append did not return an ID.")
+        return str(message_id)
+
+    async def link_workflow_to_message(
+        self,
+        conversation_id: str,
+        *,
+        workflow_id: str,
+        remote_message_id: str,
+        operation: str,
+    ) -> None:
+        """Link a workflow result to its persisted chat message."""
+        await self._post(
+            f"/conversations/{conversation_id}/workflow-links",
+            json={
+                "workflow_id": workflow_id,
+                "message_id": remote_message_id,
+                "relation_type": "message_result",
+                "link_metadata": {
+                    "operation": operation,
+                    "client": "mcp",
+                    "client_relation": "asset_version",
+                },
+            },
+        )
 
     # ── Internal helpers ──────────────────────────────────────────────────────
 
@@ -402,6 +455,24 @@ class Nova3DClient:
             if timeout is not None:
                 kwargs["timeout"] = timeout
             resp = await self._http.post(path, **kwargs)
+            return self._handle_response(resp)
+        except httpx.TimeoutException as e:
+            raise Nova3DError(f"Request timed out: {e}")
+        except httpx.NetworkError as e:
+            raise Nova3DError(f"Network error: {e}")
+
+    async def _patch(
+        self,
+        path: str,
+        json: Dict[str, Any],
+        timeout: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        assert self._http is not None, "Client not started — use async with"
+        try:
+            kwargs: Dict[str, Any] = {"json": json}
+            if timeout is not None:
+                kwargs["timeout"] = timeout
+            resp = await self._http.patch(path, **kwargs)
             return self._handle_response(resp)
         except httpx.TimeoutException as e:
             raise Nova3DError(f"Request timed out: {e}")

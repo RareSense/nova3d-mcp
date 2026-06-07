@@ -331,6 +331,102 @@ async def test_create_conversation_missing_id_raises(mock_api):
             await client.create_conversation(title="a robot")
 
 
+@pytest.mark.asyncio
+async def test_update_conversation_snapshot_sends_flutter_metadata(mock_api):
+    captured_requests = []
+
+    def capture_and_respond(request, route):
+        captured_requests.append(request)
+        return httpx.Response(200, json={"id": "conv-abc123"})
+
+    mock_api.patch("/conversations/conv-abc123").mock(
+        side_effect=capture_and_respond
+    )
+    messages = [
+        {
+            "id": "cad-state-123",
+            "role": "assistant",
+            "text": "Your 3D model is ready.",
+            "created_at": "2026-06-07T00:00:00Z",
+            "is_streaming": False,
+            "model_url": "https://nova3d.xyz/assets/abc.glb",
+        }
+    ]
+
+    async with Nova3DClient(token=FAKE_TOKEN, base_url=BASE_URL) as client:
+        await client.update_conversation_snapshot(
+            "conv-abc123",
+            title="a robot",
+            messages=messages,
+        )
+
+    parsed = json.loads(captured_requests[0].content)
+    assert parsed["title"] == "a robot"
+    snapshot = parsed["conversation_metadata"]["nova3d_chat_snapshot"]
+    assert snapshot["schema_version"] == 1
+    assert snapshot["messages"] == messages
+
+
+@pytest.mark.asyncio
+async def test_append_conversation_message_sends_content_json(mock_api):
+    captured_requests = []
+
+    def capture_and_respond(request, route):
+        captured_requests.append(request)
+        return httpx.Response(201, json={"id": "msg-remote"})
+
+    mock_api.post("/conversations/conv-abc123/messages").mock(
+        side_effect=capture_and_respond
+    )
+    message = {
+        "id": "cad-state-123",
+        "role": "assistant",
+        "text": "Your 3D model is ready.",
+        "created_at": "2026-06-07T00:00:00Z",
+        "is_streaming": False,
+        "workflow_id": "state-123",
+    }
+
+    async with Nova3DClient(token=FAKE_TOKEN, base_url=BASE_URL) as client:
+        remote_id = await client.append_conversation_message(
+            "conv-abc123",
+            message,
+        )
+
+    parsed = json.loads(captured_requests[0].content)
+    assert remote_id == "msg-remote"
+    assert parsed["client_message_id"] == "cad-state-123"
+    assert parsed["status"] == "completed"
+    assert parsed["content_json"] == message
+
+
+@pytest.mark.asyncio
+async def test_link_workflow_to_message_sends_mcp_metadata(mock_api):
+    captured_requests = []
+
+    def capture_and_respond(request, route):
+        captured_requests.append(request)
+        return httpx.Response(201, json={"id": "link-1"})
+
+    mock_api.post("/conversations/conv-abc123/workflow-links").mock(
+        side_effect=capture_and_respond
+    )
+
+    async with Nova3DClient(token=FAKE_TOKEN, base_url=BASE_URL) as client:
+        await client.link_workflow_to_message(
+            "conv-abc123",
+            workflow_id="state-123",
+            remote_message_id="msg-remote",
+            operation="initial_generation",
+        )
+
+    parsed = json.loads(captured_requests[0].content)
+    assert parsed["workflow_id"] == "state-123"
+    assert parsed["message_id"] == "msg-remote"
+    assert parsed["relation_type"] == "message_result"
+    assert parsed["link_metadata"]["client"] == "mcp"
+
+
 def test_result_parsing_api_key_source_present():
     data = {
         "sketch_to_3d_generator": [

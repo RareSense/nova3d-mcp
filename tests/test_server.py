@@ -108,22 +108,28 @@ async def test_generate_3d_creates_conversation_and_returns_url(monkeypatch):
     """generate_3d creates a conversation and embeds its ID in code_artifact."""
     monkeypatch.setenv("NOVA3D_TOKEN", "n3d_testkey")
     monkeypatch.setenv("NOVA3D_API_URL", "https://nova3d.xyz/api")
+    monkeypatch.delenv("NOVA3D_APP_URL", raising=False)
 
     fake_result = MagicMock()
     fake_result.failed = False
     fake_result.glb_url = "https://nova3d.xyz/assets/abc.glb"
-    fake_result.preview_url = "https://nova3d.xyz/preview/wf-123"
     fake_result.parts = ["body", "door"]
     fake_result.joint_count = 0
     fake_result.joints = []
     fake_result.code_artifact = {"content": "import bpy"}
     fake_result.model_artifact = None
+    fake_result.joints_artifact = None
     fake_result.workflow_id = "wf-123"
     fake_result.api_key_source = "request"
 
     mock_client = AsyncMock()
     mock_client.create_conversation = AsyncMock(return_value="conv-xyz")
     mock_client.generate = AsyncMock(return_value=fake_result)
+    mock_client.update_conversation_snapshot = AsyncMock(return_value=None)
+    mock_client.append_conversation_message = AsyncMock(
+        side_effect=["remote-user", "remote-assistant"]
+    )
+    mock_client.link_workflow_to_message = AsyncMock(return_value=None)
     mock_client.__aenter__ = AsyncMock(return_value=mock_client)
     mock_client.__aexit__ = AsyncMock(return_value=None)
 
@@ -133,15 +139,60 @@ async def test_generate_3d_creates_conversation_and_returns_url(monkeypatch):
         )
 
     assert result["failed"] is False
-    assert result["conversation_url"] == "https://nova3d.xyz/chat/conv-xyz"
+    assert result["conversation_url"] == "https://app.nova3d.xyz/chat/conv-xyz"
+    assert result["history_persisted"] is True
     assert result["code_artifact"]["_nova3d_conversation_id"] == "conv-xyz"
     assert result["code_artifact"]["_nova3d_prompt"] == "a washing machine"
     mock_client.create_conversation.assert_called_once_with(title="a washing machine")
     mock_client.generate.assert_called_once()
+    mock_client.update_conversation_snapshot.assert_called_once()
+    assert mock_client.append_conversation_message.call_count == 2
+    mock_client.link_workflow_to_message.assert_called_once()
+    snapshot_messages = mock_client.update_conversation_snapshot.call_args.kwargs["messages"]
+    assert snapshot_messages[0]["role"] == "user"
+    assert snapshot_messages[0]["text"] == "a washing machine"
+    assert snapshot_messages[1]["role"] == "assistant"
+    assert snapshot_messages[1]["model_url"] == fake_result.glb_url
+    assert snapshot_messages[1]["code_artifact"]["_nova3d_conversation_id"] == "conv-xyz"
     call_kwargs = mock_client.generate.call_args.kwargs
     assert call_kwargs["conversation_id"] == "conv-xyz"
     assert call_kwargs["provider"] == "gemini"
     assert call_kwargs["llm"] == "gemini"
+
+
+@pytest.mark.asyncio
+async def test_generate_3d_uses_configured_app_url(monkeypatch):
+    monkeypatch.setenv("NOVA3D_TOKEN", "n3d_testkey")
+    monkeypatch.setenv("NOVA3D_API_URL", "https://nova3d.xyz/api")
+    monkeypatch.setenv("NOVA3D_APP_URL", "http://127.0.0.1:5555")
+
+    fake_result = MagicMock()
+    fake_result.failed = False
+    fake_result.glb_url = "https://nova3d.xyz/assets/abc.glb"
+    fake_result.parts = []
+    fake_result.joint_count = 0
+    fake_result.joints = []
+    fake_result.code_artifact = {"content": "import bpy"}
+    fake_result.model_artifact = None
+    fake_result.joints_artifact = None
+    fake_result.workflow_id = "wf-local"
+    fake_result.api_key_source = None
+
+    mock_client = AsyncMock()
+    mock_client.create_conversation = AsyncMock(return_value="conv-local")
+    mock_client.generate = AsyncMock(return_value=fake_result)
+    mock_client.update_conversation_snapshot = AsyncMock(return_value=None)
+    mock_client.append_conversation_message = AsyncMock(
+        side_effect=["remote-user", "remote-assistant"]
+    )
+    mock_client.link_workflow_to_message = AsyncMock(return_value=None)
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=None)
+
+    with patch("nova3d_mcp.server.Nova3DClient", return_value=mock_client):
+        result = await server_module.generate_3d(prompt="a local model")
+
+    assert result["conversation_url"] == "http://127.0.0.1:5555/chat/conv-local"
 
 
 @pytest.mark.asyncio
@@ -153,12 +204,12 @@ async def test_generate_3d_conversation_failure_does_not_block_generation(monkey
     fake_result = MagicMock()
     fake_result.failed = False
     fake_result.glb_url = "https://nova3d.xyz/assets/abc.glb"
-    fake_result.preview_url = "https://nova3d.xyz/preview/wf-123"
     fake_result.parts = ["body"]
     fake_result.joint_count = 0
     fake_result.joints = []
     fake_result.code_artifact = {"content": "import bpy"}
     fake_result.model_artifact = None
+    fake_result.joints_artifact = None
     fake_result.workflow_id = "wf-123"
     fake_result.api_key_source = "request"
 
@@ -177,6 +228,7 @@ async def test_generate_3d_conversation_failure_does_not_block_generation(monkey
     assert result["failed"] is False
     assert result["code_artifact"].get("_nova3d_prompt") == "a chair"
     assert "conversation_url" not in result
+    assert result["history_persisted"] is False
     assert "_nova3d_conversation_id" not in result.get("code_artifact", {})
     mock_client.generate.assert_called_once()
     assert mock_client.generate.call_args.kwargs["conversation_id"] is None
@@ -192,27 +244,41 @@ async def test_regenerate_part_propagates_conversation_id(monkeypatch):
     fake_result = MagicMock()
     fake_result.failed = False
     fake_result.glb_url = "https://nova3d.xyz/assets/abc.glb"
-    fake_result.preview_url = "https://nova3d.xyz/preview/wf-456"
     fake_result.parts = ["body", "door"]
     fake_result.code_artifact = {"content": "import bpy # updated"}
+    fake_result.model_artifact = None
+    fake_result.joints_artifact = None
+    fake_result.joints = []
     fake_result.workflow_id = "wf-456"
     fake_result.api_key_source = "request"
 
     mock_client = AsyncMock()
     mock_client.regenerate_part = AsyncMock(return_value=fake_result)
+    mock_client.append_conversation_message = AsyncMock(return_value="remote-edit")
+    mock_client.link_workflow_to_message = AsyncMock(return_value=None)
     mock_client.__aenter__ = AsyncMock(return_value=mock_client)
     mock_client.__aexit__ = AsyncMock(return_value=None)
 
     with patch("nova3d_mcp.server.Nova3DClient", return_value=mock_client):
         result = await server_module.regenerate_part(
-            code_artifact={"content": "import bpy", "_nova3d_conversation_id": "conv-xyz"},
+            code_artifact={
+                "content": "import bpy",
+                "_nova3d_conversation_id": "conv-xyz",
+                "_nova3d_prompt": "original prompt",
+            },
             part_type="door",
             description="glass door with chrome frame",
         )
 
     assert result["failed"] is False
-    assert result["conversation_url"] == "https://nova3d.xyz/chat/conv-xyz"
+    assert result["conversation_url"] == "https://app.nova3d.xyz/chat/conv-xyz"
+    assert result["history_persisted"] is True
     assert result["code_artifact"]["_nova3d_conversation_id"] == "conv-xyz"
+    assert result["code_artifact"]["_nova3d_prompt"] == "original prompt"
+    mock_client.append_conversation_message.assert_called_once()
+    edit_message = mock_client.append_conversation_message.call_args.args[1]
+    assert edit_message["message_type"] == "asset_version"
+    assert edit_message["operation"] == "regenerate_3d_part"
     call_kwargs = mock_client.regenerate_part.call_args.kwargs
     assert call_kwargs["conversation_id"] == "conv-xyz"
 
@@ -225,9 +291,11 @@ async def test_regenerate_part_no_conversation_id_in_artifact(monkeypatch):
     fake_result = MagicMock()
     fake_result.failed = False
     fake_result.glb_url = "https://nova3d.xyz/assets/abc.glb"
-    fake_result.preview_url = "https://nova3d.xyz/preview/wf-456"
     fake_result.parts = ["body"]
     fake_result.code_artifact = {"content": "import bpy"}
+    fake_result.model_artifact = None
+    fake_result.joints_artifact = None
+    fake_result.joints = []
     fake_result.workflow_id = "wf-456"
     fake_result.api_key_source = "request"
 
@@ -245,6 +313,7 @@ async def test_regenerate_part_no_conversation_id_in_artifact(monkeypatch):
 
     assert result["failed"] is False
     assert "conversation_url" not in result
+    assert result["history_persisted"] is False
     assert "_nova3d_conversation_id" not in result.get("code_artifact", {})
     call_kwargs = mock_client.regenerate_part.call_args.kwargs
     assert call_kwargs.get("conversation_id") is None
@@ -258,14 +327,18 @@ async def test_add_part_propagates_conversation_id(monkeypatch):
     fake_result = MagicMock()
     fake_result.failed = False
     fake_result.glb_url = "https://nova3d.xyz/assets/abc.glb"
-    fake_result.preview_url = "https://nova3d.xyz/preview/wf-789"
     fake_result.parts = ["body", "handle"]
     fake_result.code_artifact = {"content": "import bpy # with handle"}
+    fake_result.model_artifact = None
+    fake_result.joints_artifact = None
+    fake_result.joints = []
     fake_result.workflow_id = "wf-789"
     fake_result.api_key_source = "request"
 
     mock_client = AsyncMock()
     mock_client.add_part = AsyncMock(return_value=fake_result)
+    mock_client.append_conversation_message = AsyncMock(return_value="remote-edit")
+    mock_client.link_workflow_to_message = AsyncMock(return_value=None)
     mock_client.__aenter__ = AsyncMock(return_value=mock_client)
     mock_client.__aexit__ = AsyncMock(return_value=None)
 
@@ -275,8 +348,9 @@ async def test_add_part_propagates_conversation_id(monkeypatch):
             description="a chrome handle bar",
         )
 
-    assert result["conversation_url"] == "https://nova3d.xyz/chat/conv-xyz"
+    assert result["conversation_url"] == "https://app.nova3d.xyz/chat/conv-xyz"
     assert result["code_artifact"]["_nova3d_conversation_id"] == "conv-xyz"
+    assert result["history_persisted"] is True
     call_kwargs = mock_client.add_part.call_args.kwargs
     assert call_kwargs["conversation_id"] == "conv-xyz"
 
@@ -406,10 +480,11 @@ async def test_articulate_model_with_model_artifact(monkeypatch):
     fake_result = MagicMock()
     fake_result.failed = False
     fake_result.glb_url = "https://nova3d.xyz/assets/articulated.glb"
-    fake_result.preview_url = "https://nova3d.xyz/preview/wf-art"
     fake_result.joints = [{"name": "door_hinge"}]
     fake_result.joint_count = 1
     fake_result.code_artifact = {"content": "import bpy"}
+    fake_result.model_artifact = None
+    fake_result.joints_artifact = None
     fake_result.workflow_id = "wf-art"
     fake_result.api_key_source = None
 
