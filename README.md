@@ -4,7 +4,7 @@
 
 nova3d-mcp is an [MCP](https://modelcontextprotocol.io) server that exposes
 [Nova3D](https://nova3d.xyz)'s generation pipeline as a callable tool inside
-Claude Code, Cursor, and any MCP-compatible agent.
+Codex, Cursor, VS Code, Visual Studio, Claude Code, and other MCP-compatible agents.
 
 One tool call. A washing machine comes back with named drum, door, control
 panel, and hose connectors — separately editable, not fused into a blob.
@@ -36,6 +36,22 @@ regenerating everything.
 
 ---
 
+## Supported clients
+
+| Client | Status | Install path | Preview path |
+|---|---|---|---|
+| Codex | Supported | `codex mcp add` or Codex MCP config | Browser `preview_url` |
+| Cursor | Supported | `.cursor/mcp.json` or `~/.cursor/mcp.json` | Browser `preview_url` |
+| VS Code | Supported | `.vscode/mcp.json`, MCP: Add Server, or `code --add-mcp` | Browser `preview_url` |
+| Visual Studio | Supported | `.mcp.json` or Visual Studio MCP UI | Browser `preview_url` |
+| Claude Code | Supported | `claude mcp add` | Browser `preview_url` |
+
+Nova3D runs from your MCP client, but model inspection happens through the
+hosted browser viewer returned as `preview_url`. This repository does not
+currently ship an embedded IDE-native 3D viewport.
+
+---
+
 ## Quickstart
 
 ### 1. Get an API key
@@ -49,12 +65,28 @@ export NOVA3D_TOKEN="n3d_your-api-key-here"
 API keys never expire unless revoked. The MCP server validates your key on startup
 and prints a clear error if it's missing or invalid.
 
-### 2. Configure Your Agent
+### 2. Install in your MCP client
 
-You can run `nova3d-mcp` directly using `uvx` (recommended) or by installing from source.
+#### Codex
 
-#### Option A: Running via PyPI (Recommended)
-Add this to your agent's configuration file (e.g., `claude_desktop_config.json`):
+```bash
+codex mcp add nova3d --env NOVA3D_TOKEN=n3d_your-api-key-here -- uvx nova3d-mcp
+```
+
+Codex also supports MCP configuration through `~/.codex/config.toml`. If you
+prefer config files over the CLI, use Codex's MCP config surface and point it
+at the same stdio command: `uvx nova3d-mcp`.
+
+#### Claude Code
+
+```bash
+claude mcp add nova3d -e NOVA3D_TOKEN=n3d_your-api-key-here -- uvx nova3d-mcp
+```
+
+#### Cursor
+
+Create `.cursor/mcp.json` in your project, or `~/.cursor/mcp.json` for a global
+install:
 
 ```json
 {
@@ -70,23 +102,22 @@ Add this to your agent's configuration file (e.g., `claude_desktop_config.json`)
 }
 ```
 
-#### Option B: Installing from Source
-Clone the repository and install the package locally:
+#### VS Code
+
+Option A: add the server from the command line:
 
 ```bash
-git clone https://github.com/RareSense/nova3d-mcp.git
-cd nova3d-mcp
-python3.10 -m venv .venv && source .venv/bin/activate
-pip install .
+code --add-mcp "{\"name\":\"nova3d\",\"command\":\"uvx\",\"args\":[\"nova3d-mcp\"],\"env\":{\"NOVA3D_TOKEN\":\"n3d_your-api-key-here\"}}"
 ```
 
-Then add this to your agent's configuration file:
+Option B: create `.vscode/mcp.json` in your workspace:
 
 ```json
 {
-  "mcpServers": {
+  "servers": {
     "nova3d": {
-      "command": "nova3d-mcp",
+      "command": "uvx",
+      "args": ["nova3d-mcp"],
       "env": {
         "NOVA3D_TOKEN": "n3d_your-api-key-here"
       }
@@ -95,7 +126,44 @@ Then add this to your agent's configuration file:
 }
 ```
 
+You can also use `MCP: Add Server` from the Command Palette.
+
+#### Visual Studio
+
+Create `<SOLUTIONDIR>/.mcp.json` or `%USERPROFILE%/.mcp.json`:
+
+```json
+{
+  "servers": {
+    "nova3d": {
+      "command": "uvx",
+      "args": ["nova3d-mcp"],
+      "env": {
+        "NOVA3D_TOKEN": "n3d_your-api-key-here"
+      }
+    }
+  }
+}
+```
+
+You can also add the server from the Visual Studio MCP UI by providing the
+stdio command `uvx` with args `["nova3d-mcp"]` and the `NOVA3D_TOKEN`
+environment variable.
+
 ### 3. Generate
+
+If you prefer to install from source instead of `uvx`, clone the repository and
+install the package locally:
+
+```bash
+git clone https://github.com/RareSense/nova3d-mcp.git
+cd nova3d-mcp
+python3.10 -m venv .venv && source .venv/bin/activate
+pip install .
+```
+
+Then replace `uvx nova3d-mcp` in the client examples above with the local
+`nova3d-mcp` executable from your environment.
 
 Pass a prompt like this to your AI agent:
 
@@ -118,6 +186,28 @@ The agent calls `generate_3d`. You get back:
 ```
 
 - **`conversation_url`** — your editing session in the Nova3D app, with the generated model and edit history already hydrated. All subsequent `regenerate_part`, `add_part`, and `articulate_model` calls on this asset link back to the same session.
+
+---
+
+## Preview and configuration notes
+
+- `preview_url` is the standard supported way to inspect generated assets today.
+- `conversation_url` opens the full edit session on nova3d.xyz.
+- Keep secrets out of checked-in workspace config when possible. Prefer
+  per-user configuration files or client-managed environment variables.
+- If your editor supports source-controlled MCP config, commit the server entry
+  and inject `NOVA3D_TOKEN` per-user.
+
+---
+
+## Troubleshooting
+
+| Problem | What to check |
+|---|---|
+| `NOVA3D_TOKEN is not set` | Add `NOVA3D_TOKEN` to your MCP server environment and restart the client |
+| Auth failure on startup | Confirm the key at https://app.nova3d.xyz/api-key |
+| `uvx` not found | Install `uv` or use a local `nova3d-mcp` executable from a virtualenv |
+| No 3D preview inside the editor | Open the returned `preview_url` in the browser; that is the supported preview path |
 
 ---
 
