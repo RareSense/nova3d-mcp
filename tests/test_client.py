@@ -52,25 +52,62 @@ def _status_running():
 
 def _status_completed():
     return {
-        "runtime": {"state": "completed", "last_exit_node_id": "success_final"},
-        "node_visit_seq": {"sketch_to_3d_generator": 1},
+        "runtime": {"state": "completed", "last_exit_node_id": "final_latest_valid"},
+        "node_visit_seq": {"final_latest_valid": 1},
     }
 
 
 def _result_ok():
     return {
-        "sketch_to_3d_generator": [
+        "final_latest_valid": [
             {
-                "result": {
-                    "model_url": "https://nova3d.xyz/assets/abc123.glb",
-                    "model_artifact": {"url": "https://nova3d.xyz/assets/abc123.glb"},
-                    "code_artifact": {"content": "import bpy\n# generated code"},
-                    "joints": [{"name": "door_hinge", "type": "revolute", "mesh": "door"}],
-                    "joint_count": 1,
-                    "operation": "sketch_to_3d",
-                }
+                "status": "completed",
+                "ok": True,
+                "glb_artifact": {"url": "https://nova3d.xyz/assets/abc123.glb"},
+                "model_artifact": {"url": "https://nova3d.xyz/assets/abc123.glb"},
+                "code_artifact": {"content": "import bpy\n# generated code"},
+                "joints": [{"name": "door_hinge", "type": "revolute", "mesh": "door"}],
+                "joint_count": 1,
+                "operation": "initial_generation",
             }
         ]
+    }
+
+
+def _result_corrected_ok():
+    return {
+        "final_validated_correction": [
+            {
+                "status": "completed",
+                "ok": True,
+                "glb_artifact": {"url": "https://nova3d.xyz/assets/corrected.glb"},
+                "code_artifact": {"content": "import bpy\n# corrected generated code"},
+            }
+        ]
+    }
+
+
+def _mcp_status_ready():
+    return {
+        "authenticated": True,
+        "identity": {
+            "user_id": "user-123",
+            "email": "user@example.com",
+            "tenant_id": "ten_123",
+        },
+        "mcp_session": {
+            "established": True,
+            "expires_at": "2026-09-10T14:32:00Z",
+        },
+        "credits": {
+            "balance": 350,
+            "reserved": 50,
+            "available": 300,
+            "funded": True,
+        },
+        "generation_ready": True,
+        "next_action": None,
+        "next_action_url": None,
     }
 
 
@@ -78,10 +115,10 @@ def _result_ok():
 
 @pytest.mark.asyncio
 async def test_generate_success(mock_api):
-    mock_api.get("/workflow/readiness/sketch_to_3d").mock(
+    mock_api.get("/workflow/readiness/sketch_to_3d_v2").mock(
         return_value=httpx.Response(200, json=_readiness_ok())
     )
-    mock_api.post("/run/state/sketch_to_3d").mock(
+    mock_api.post("/run/state/sketch_to_3d_v2").mock(
         return_value=httpx.Response(202, json=_start_ok())
     )
     # First status poll returns running, second returns completed
@@ -103,8 +140,8 @@ async def test_generate_success(mock_api):
 
         result = await client.generate(
             prompt="a toaster with removable tray",
-            provider="gemini",
-            llm="gemini",
+            code_llm_profile="nova3d_code_generation",
+            code_llm_tier="gemini_3_1_pro_google",
         )
 
         client_module.asyncio.sleep = original_sleep
@@ -118,7 +155,7 @@ async def test_generate_success(mock_api):
 
 @pytest.mark.asyncio
 async def test_generate_not_ready(mock_api):
-    mock_api.get("/workflow/readiness/sketch_to_3d").mock(
+    mock_api.get("/workflow/readiness/sketch_to_3d_v2").mock(
         return_value=httpx.Response(200, json={
             "ready": False,
             "reason": "generation_service_unavailable",
@@ -129,17 +166,17 @@ async def test_generate_not_ready(mock_api):
         with pytest.raises(Nova3DError, match="unavailable"):
             await client.generate(
                 prompt="a robot",
-                provider="gemini",
-                llm="gemini",
+                code_llm_profile="nova3d_code_generation",
+                code_llm_tier="gemini_3_1_pro_google",
             )
 
 
 @pytest.mark.asyncio
 async def test_generate_credits_error(mock_api):
-    mock_api.get("/workflow/readiness/sketch_to_3d").mock(
+    mock_api.get("/workflow/readiness/sketch_to_3d_v2").mock(
         return_value=httpx.Response(200, json=_readiness_ok())
     )
-    mock_api.post("/run/state/sketch_to_3d").mock(
+    mock_api.post("/run/state/sketch_to_3d_v2").mock(
         return_value=httpx.Response(402, json={
             "code": "credits_or_user_key_required",
             "message": "Add credits or provide your own provider API key to generate.",
@@ -150,8 +187,8 @@ async def test_generate_credits_error(mock_api):
         with pytest.raises(Nova3DCreditsError):
             await client.generate(
                 prompt="a robot",
-                provider="gemini",
-                llm="gemini",
+                code_llm_profile="nova3d_code_generation",
+                code_llm_tier="gemini_3_1_pro_google",
             )
 
 
@@ -166,13 +203,11 @@ async def test_result_parsing_glb_url():
 @pytest.mark.asyncio
 async def test_result_parsing_failure():
     data = {
-        "sketch_to_3d_generator": [
+        "fail_generation": [
             {
-                "result": {
-                    "status": "failed",
-                    "error_category": "blender_generation_failed",
-                    "user_message": "The script could not produce a valid model.",
-                }
+                "status": "failed",
+                "error_category": "blender_generation_failed",
+                "user_message": "The script could not produce a valid model.",
             }
         ]
     }
@@ -238,10 +273,10 @@ def test_parse_auth_error_no_json():
 
 @pytest.mark.asyncio
 async def test_generate_raises_auth_error_with_code(mock_api):
-    mock_api.get("/workflow/readiness/sketch_to_3d").mock(
+    mock_api.get("/workflow/readiness/sketch_to_3d_v2").mock(
         return_value=httpx.Response(200, json=_readiness_ok())
     )
-    mock_api.post("/run/state/sketch_to_3d").mock(
+    mock_api.post("/run/state/sketch_to_3d_v2").mock(
         return_value=httpx.Response(401, json={
             "detail": {"code": "api_key_revoked", "message": "Revoked."}
         })
@@ -250,8 +285,8 @@ async def test_generate_raises_auth_error_with_code(mock_api):
         with pytest.raises(Nova3DAuthError, match="revoked"):
             await client.generate(
                 prompt="a robot",
-                provider="gemini",
-                llm="gemini",
+                code_llm_profile="nova3d_code_generation",
+                code_llm_tier="gemini_3_1_pro_google",
             )
 
 
@@ -281,6 +316,58 @@ async def test_get_me_invalid_key(mock_api):
     async with Nova3DClient(token="n3d_bad", base_url=BASE_URL) as client:
         with pytest.raises(Nova3DAuthError, match="invalid"):
             await client.get_me()
+
+
+@pytest.mark.asyncio
+async def test_get_mcp_status_success(mock_api):
+    mock_api.get("/mcp/status").mock(
+        return_value=httpx.Response(200, json=_mcp_status_ready())
+    )
+
+    async with Nova3DClient(token=None, base_url=BASE_URL) as client:
+        status = await client.get_mcp_status()
+
+    assert status.authenticated is True
+    assert status.generation_ready is True
+    assert status.next_action is None
+    assert status.identity.email == "user@example.com"
+    assert status.credits.available == 300
+
+
+@pytest.mark.asyncio
+async def test_exchange_mcp_session_code_success(mock_api):
+    mock_api.post("/mcp/session/exchange").mock(
+        return_value=httpx.Response(200, json={"token": "n3d_test_session", "expires_at": "2026-09-10T14:32:00Z"})
+    )
+
+    async with Nova3DClient(token=None, base_url=BASE_URL) as client:
+        token = await client.exchange_mcp_session_code("session-code")
+
+    assert token == "n3d_test_session"
+
+
+@pytest.mark.asyncio
+async def test_exchange_mcp_session_returns_expires_at(mock_api):
+    mock_api.post("/mcp/session/exchange").mock(
+        return_value=httpx.Response(200, json={"token": "n3d_test_session", "expires_at": "2026-09-10T14:32:00Z"})
+    )
+
+    async with Nova3DClient(token=None, base_url=BASE_URL) as client:
+        exchange = await client.exchange_mcp_session("session-code")
+
+    assert exchange.token == "n3d_test_session"
+    assert exchange.expires_at == "2026-09-10T14:32:00Z"
+
+
+@pytest.mark.asyncio
+async def test_exchange_mcp_session_code_missing_token_raises(mock_api):
+    mock_api.post("/mcp/session/exchange").mock(
+        return_value=httpx.Response(200, json={"ok": True})
+    )
+
+    async with Nova3DClient(token=None, base_url=BASE_URL) as client:
+        with pytest.raises(Nova3DError, match="did not return a Nova3D credential"):
+            await client.exchange_mcp_session_code("session-code")
 
 
 @pytest.mark.asyncio
@@ -429,14 +516,14 @@ async def test_link_workflow_to_message_sends_mcp_metadata(mock_api):
 
 def test_result_parsing_api_key_source_present():
     data = {
-        "sketch_to_3d_generator": [
+        "final_latest_valid": [
             {
-                "result": {
-                    "model_url": "https://nova3d.xyz/assets/abc123.glb",
-                    "model_artifact": {"url": "https://nova3d.xyz/assets/abc123.glb"},
-                    "code_artifact": {"content": "import bpy"},
-                    "api_key_source": "request",
-                }
+                "status": "completed",
+                "ok": True,
+                "glb_artifact": {"url": "https://nova3d.xyz/assets/abc123.glb"},
+                "model_artifact": {"url": "https://nova3d.xyz/assets/abc123.glb"},
+                "code_artifact": {"content": "import bpy"},
+                "api_key_source": "request",
             }
         ]
     }
@@ -458,10 +545,9 @@ async def test_validate_startup_no_token(monkeypatch, capsys):
     server_module._startup_error = None
     monkeypatch.delenv("NOVA3D_TOKEN", raising=False)
     await _validate_startup()
-    assert server_module._startup_error is not None
-    assert "NOVA3D_TOKEN is not set" in server_module._startup_error
+    assert server_module._startup_error is None
     captured = capsys.readouterr()
-    assert "NOVA3D_TOKEN is not set" in captured.err
+    assert captured.err == ""
     server_module._startup_error = None
 
 
@@ -492,8 +578,7 @@ async def test_validate_startup_revoked_key(mock_api, monkeypatch, capsys):
         })
     )
     await _validate_startup()
-    assert server_module._startup_error is not None
-    assert "revoked" in server_module._startup_error.lower()
+    assert server_module._startup_error is None
     captured = capsys.readouterr()
     assert "revoked" in captured.err.lower()
     server_module._startup_error = None
@@ -516,23 +601,23 @@ async def test_validate_startup_network_error(monkeypatch, capsys):
 
 def test_result_parsing_parts_from_code_artifact():
     data = {
-        "sketch_to_3d_generator": [
+        "final_latest_valid": [
             {
-                "result": {
-                    "model_url": "https://nova3d.xyz/assets/abc123.glb",
-                    "model_artifact": {"url": "https://nova3d.xyz/assets/abc123.glb"},
-                    "code_artifact": {
-                        "content": (
-                            "import bpy\n"
-                            "bpy.ops.mesh.primitive_cube_add()\n"
-                            "obj = bpy.context.active_object\n"
-                            "obj.name = \"body\"\n"
-                            "bpy.ops.mesh.primitive_cylinder_add()\n"
-                            "wheel = bpy.context.active_object\n"
-                            "wheel.name = \"wheel_fr\"\n"
-                        )
-                    },
-                }
+                "status": "completed",
+                "ok": True,
+                "glb_artifact": {"url": "https://nova3d.xyz/assets/abc123.glb"},
+                "model_artifact": {"url": "https://nova3d.xyz/assets/abc123.glb"},
+                "code_artifact": {
+                    "content": (
+                        "import bpy\n"
+                        "bpy.ops.mesh.primitive_cube_add()\n"
+                        "obj = bpy.context.active_object\n"
+                        "obj.name = \"body\"\n"
+                        "bpy.ops.mesh.primitive_cylinder_add()\n"
+                        "wheel = bpy.context.active_object\n"
+                        "wheel.name = \"wheel_fr\"\n"
+                    )
+                },
             }
         ]
     }
@@ -542,16 +627,16 @@ def test_result_parsing_parts_from_code_artifact():
 
 def test_result_parsing_parts_api_field_takes_precedence():
     data = {
-        "sketch_to_3d_generator": [
+        "final_latest_valid": [
             {
-                "result": {
-                    "model_url": "https://nova3d.xyz/assets/abc123.glb",
-                    "model_artifact": {"url": "https://nova3d.xyz/assets/abc123.glb"},
-                    "code_artifact": {
-                        "content": 'obj.name = "should_not_appear"'
-                    },
-                    "parts": ["door", "frame"],
-                }
+                "status": "completed",
+                "ok": True,
+                "glb_artifact": {"url": "https://nova3d.xyz/assets/abc123.glb"},
+                "model_artifact": {"url": "https://nova3d.xyz/assets/abc123.glb"},
+                "code_artifact": {
+                    "content": 'obj.name = "should_not_appear"'
+                },
+                "parts": ["door", "frame"],
             }
         ]
     }
@@ -568,10 +653,10 @@ async def test_generate_sends_conversation_id(mock_api):
         captured_requests.append(request)
         return httpx.Response(202, json=_start_ok())
 
-    mock_api.get("/workflow/readiness/sketch_to_3d").mock(
+    mock_api.get("/workflow/readiness/sketch_to_3d_v2").mock(
         return_value=httpx.Response(200, json=_readiness_ok())
     )
-    mock_api.post("/run/state/sketch_to_3d").mock(side_effect=capture_and_respond)
+    mock_api.post("/run/state/sketch_to_3d_v2").mock(side_effect=capture_and_respond)
     mock_api.get(f"/status/{WORKFLOW_ID}").mock(
         return_value=httpx.Response(200, json=_status_completed())
     )
@@ -586,8 +671,8 @@ async def test_generate_sends_conversation_id(mock_api):
 
         await client.generate(
             prompt="a toaster",
-            provider="gemini",
-            llm="gemini",
+            code_llm_profile="nova3d_code_generation",
+            code_llm_tier="gemini_3_1_pro_google",
             conversation_id="conv-abc123",
         )
 
@@ -596,7 +681,15 @@ async def test_generate_sends_conversation_id(mock_api):
     assert len(captured_requests) == 1
     parsed = json.loads(captured_requests[0].content)
     assert parsed["conversation"]["conversation_id"] == "conv-abc123"
-    assert parsed["conversation"]["relation_type"] == "triggered_by"
+    assert parsed["conversation"]["relation_type"] == "initial_generation"
+    assert parsed["conversation"]["link_metadata"]["operation"] == "sketch_to_3d_v2"
+    assert parsed["payload"]["code_llm_profile"] == "nova3d_code_generation"
+    assert parsed["payload"]["code_llm_tier"] == "gemini_3_1_pro_google"
+    assert parsed["return_nodes"] == [
+        "final_validated_correction",
+        "final_latest_valid",
+        "fail_generation",
+    ]
 
 
 @pytest.mark.asyncio
@@ -608,10 +701,10 @@ async def test_generate_omits_conversation_when_none(mock_api):
         captured_requests.append(request)
         return httpx.Response(202, json=_start_ok())
 
-    mock_api.get("/workflow/readiness/sketch_to_3d").mock(
+    mock_api.get("/workflow/readiness/sketch_to_3d_v2").mock(
         return_value=httpx.Response(200, json=_readiness_ok())
     )
-    mock_api.post("/run/state/sketch_to_3d").mock(side_effect=capture_and_respond)
+    mock_api.post("/run/state/sketch_to_3d_v2").mock(side_effect=capture_and_respond)
     mock_api.get(f"/status/{WORKFLOW_ID}").mock(
         return_value=httpx.Response(200, json=_status_completed())
     )
@@ -626,11 +719,141 @@ async def test_generate_omits_conversation_when_none(mock_api):
 
         await client.generate(
             prompt="a toaster",
-            provider="gemini",
-            llm="gemini",
+            code_llm_profile="nova3d_code_generation",
+            code_llm_tier="gemini_3_1_pro_google",
         )
 
         client_module.asyncio.sleep = original_sleep
 
     parsed = json.loads(captured_requests[0].content)
     assert "conversation" not in parsed
+
+
+@pytest.mark.asyncio
+async def test_regenerate_part_sends_edit_conversation_metadata(mock_api):
+    captured_requests = []
+
+    def capture_and_respond(request, route):
+        captured_requests.append(request)
+        return httpx.Response(202, json=_start_ok())
+
+    mock_api.post("/run/state/regenerate_3d_part").mock(side_effect=capture_and_respond)
+    mock_api.get(f"/status/{WORKFLOW_ID}").mock(
+        return_value=httpx.Response(200, json=_status_completed())
+    )
+    mock_api.get(f"/result/{WORKFLOW_ID}").mock(
+        return_value=httpx.Response(200, json=_result_ok())
+    )
+
+    async with Nova3DClient(token=FAKE_TOKEN, base_url=BASE_URL) as client:
+        import nova3d_mcp.client as client_module
+        original_sleep = client_module.asyncio.sleep
+        client_module.asyncio.sleep = lambda _: original_sleep(0)
+
+        await client.regenerate_part(
+            code_artifact={"content": "import bpy"},
+            part_type="door",
+            description="glass door",
+            provider="gemini",
+            llm="gemini",
+            conversation_id="conv-abc123",
+        )
+
+        client_module.asyncio.sleep = original_sleep
+
+    parsed = json.loads(captured_requests[0].content)
+    assert parsed["conversation"]["relation_type"] == "regenerate_3d_part"
+    assert parsed["conversation"]["link_metadata"]["operation"] == "regenerate_3d_part"
+
+
+@pytest.mark.asyncio
+async def test_add_part_sends_edit_conversation_metadata(mock_api):
+    captured_requests = []
+
+    def capture_and_respond(request, route):
+        captured_requests.append(request)
+        return httpx.Response(202, json=_start_ok())
+
+    mock_api.post("/run/state/add_3d_part").mock(side_effect=capture_and_respond)
+    mock_api.get(f"/status/{WORKFLOW_ID}").mock(
+        return_value=httpx.Response(200, json=_status_completed())
+    )
+    mock_api.get(f"/result/{WORKFLOW_ID}").mock(
+        return_value=httpx.Response(200, json=_result_ok())
+    )
+
+    async with Nova3DClient(token=FAKE_TOKEN, base_url=BASE_URL) as client:
+        import nova3d_mcp.client as client_module
+        original_sleep = client_module.asyncio.sleep
+        client_module.asyncio.sleep = lambda _: original_sleep(0)
+
+        await client.add_part(
+            code_artifact={"content": "import bpy"},
+            description="chrome handle",
+            provider="gemini",
+            llm="gemini",
+            conversation_id="conv-abc123",
+        )
+
+        client_module.asyncio.sleep = original_sleep
+
+    parsed = json.loads(captured_requests[0].content)
+    assert parsed["conversation"]["relation_type"] == "add_3d_part"
+    assert parsed["conversation"]["link_metadata"]["operation"] == "add_3d_part"
+
+
+@pytest.mark.asyncio
+async def test_articulate_model_sends_edit_conversation_metadata(mock_api):
+    captured_requests = []
+
+    def capture_and_respond(request, route):
+        captured_requests.append(request)
+        return httpx.Response(202, json=_start_ok())
+
+    mock_api.post("/run/state/articulate_3d_model").mock(side_effect=capture_and_respond)
+    mock_api.get(f"/status/{WORKFLOW_ID}").mock(
+        return_value=httpx.Response(200, json=_status_completed())
+    )
+    mock_api.get(f"/result/{WORKFLOW_ID}").mock(
+        return_value=httpx.Response(200, json=_result_ok())
+    )
+
+    async with Nova3DClient(token=FAKE_TOKEN, base_url=BASE_URL) as client:
+        import nova3d_mcp.client as client_module
+        original_sleep = client_module.asyncio.sleep
+        client_module.asyncio.sleep = lambda _: original_sleep(0)
+
+        await client.articulate_model(
+            code_artifact={"content": "import bpy"},
+            articulation_request="make the door swing",
+            provider="gemini",
+            llm="gemini",
+            model_url="https://nova3d.xyz/assets/abc123.glb",
+            conversation_id="conv-abc123",
+        )
+
+        client_module.asyncio.sleep = original_sleep
+
+    parsed = json.loads(captured_requests[0].content)
+    assert parsed["conversation"]["relation_type"] == "articulate_model"
+    assert parsed["conversation"]["link_metadata"]["operation"] == "articulate_3d_model"
+
+
+def test_result_parsing_v2_corrected_output():
+    result = GenerationResult.from_api(_result_corrected_ok(), WORKFLOW_ID)
+    assert result.failed is False
+    assert result.glb_url == "https://nova3d.xyz/assets/corrected.glb"
+    assert result.model_artifact["url"] == "https://nova3d.xyz/assets/corrected.glb"
+
+
+def test_status_progress_label_for_v2_node():
+    from nova3d_mcp.models import WorkflowStatus
+
+    status = WorkflowStatus.from_api(
+        WORKFLOW_ID,
+        {
+            "runtime": {"state": "running", "last_exit_node_id": None},
+            "node_visit_seq": {"validation_llm": 1},
+        },
+    )
+    assert status.progress_label == "Reviewing the generated model..."

@@ -20,6 +20,8 @@ from nova3d_mcp.conversation import (
 from nova3d_mcp.models import (
     GenerationReadiness,
     GenerationResult,
+    MCPSessionExchange,
+    MCPStatus,
     WorkflowStatus,
 )
 
@@ -27,7 +29,7 @@ from nova3d_mcp.models import (
 
 NOVA3D_API_BASE = "https://nova3d.xyz/api"
 
-WORKFLOW_SKETCH_TO_3D = "sketch_to_3d"
+WORKFLOW_SKETCH_TO_3D = "sketch_to_3d_v2"
 WORKFLOW_REGENERATE_PART = "regenerate_3d_part"
 WORKFLOW_ADD_PART = "add_3d_part"
 WORKFLOW_ARTICULATE = "articulate_3d_model"
@@ -92,7 +94,7 @@ class Nova3DClient:
 
     def __init__(
         self,
-        token: str,
+        token: Optional[str],
         base_url: str = NOVA3D_API_BASE,
     ):
         self._token = token
@@ -100,6 +102,11 @@ class Nova3DClient:
         self._http: Optional[httpx.AsyncClient] = None
 
     async def __aenter__(self) -> "Nova3DClient":
+        headers = {
+            "Content-Type": "application/json",
+        }
+        if self._token:
+            headers["Authorization"] = f"Bearer {self._token}"
         self._http = httpx.AsyncClient(
             base_url=self._base_url,
             timeout=httpx.Timeout(
@@ -108,10 +115,7 @@ class Nova3DClient:
                 write=30.0,
                 pool=5.0,
             ),
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {self._token}",
-            },
+            headers=headers,
         )
         return self
 
@@ -130,10 +134,9 @@ class Nova3DClient:
     async def generate(
         self,
         prompt: str,
-        provider: str,
-        llm: str,
-        image_base64: Optional[str] = None,
-        image_mime: Optional[str] = None,
+        code_llm_profile: str,
+        code_llm_tier: str,
+        image_artifact: Optional[list[str]] = None,
         conversation_id: Optional[str] = None,
         on_progress: Optional[Callable[[WorkflowStatus], Awaitable[None]]] = None,
     ) -> GenerationResult:
@@ -147,20 +150,27 @@ class Nova3DClient:
 
         payload: Dict[str, Any] = {
             "prompt": prompt.strip(),
-            "llm": llm,
-            "provider": provider,
-            "validate": False,
+            "code_llm_profile": code_llm_profile,
+            "code_llm_tier": code_llm_tier,
         }
-        if image_base64:
-            payload["image_base64"] = image_base64
-        if image_mime:
-            payload["image_mime"] = image_mime
+        if image_artifact:
+            payload["has_reference_images"] = True
+            payload["image_artifact"] = image_artifact
 
         workflow_id = await self._start_workflow(
             workflow=WORKFLOW_SKETCH_TO_3D,
             payload=payload,
-            return_node="sketch_to_3d_generator",
+            return_nodes=[
+                "final_validated_correction",
+                "final_latest_valid",
+                "fail_generation",
+            ],
             conversation_id=conversation_id,
+            relation_type="initial_generation",
+            link_metadata={
+                "operation": WORKFLOW_SKETCH_TO_3D,
+                "client": "mcp",
+            },
         )
         return await self._poll_and_collect(workflow_id, on_progress=on_progress)
 
@@ -190,8 +200,13 @@ class Nova3DClient:
         workflow_id = await self._start_workflow(
             workflow=WORKFLOW_REGENERATE_PART,
             payload=payload,
-            return_node="regenerate_3d_part",
+            return_nodes=["regenerate_3d_part"],
             conversation_id=conversation_id,
+            relation_type=WORKFLOW_REGENERATE_PART,
+            link_metadata={
+                "operation": WORKFLOW_REGENERATE_PART,
+                "client": "mcp",
+            },
         )
         return await self._poll_and_collect(workflow_id, on_progress=on_progress)
 
@@ -217,8 +232,13 @@ class Nova3DClient:
         workflow_id = await self._start_workflow(
             workflow=WORKFLOW_ADD_PART,
             payload=payload,
-            return_node="add_3d_part",
+            return_nodes=["add_3d_part"],
             conversation_id=conversation_id,
+            relation_type=WORKFLOW_ADD_PART,
+            link_metadata={
+                "operation": WORKFLOW_ADD_PART,
+                "client": "mcp",
+            },
         )
         return await self._poll_and_collect(workflow_id, on_progress=on_progress)
 
@@ -254,8 +274,13 @@ class Nova3DClient:
         workflow_id = await self._start_workflow(
             workflow=WORKFLOW_ARTICULATE,
             payload=payload,
-            return_node="articulate_3d_model",
+            return_nodes=["articulate_3d_model"],
             conversation_id=conversation_id,
+            relation_type="articulate_model",
+            link_metadata={
+                "operation": WORKFLOW_ARTICULATE,
+                "client": "mcp",
+            },
         )
         return await self._poll_and_collect(workflow_id, on_progress=on_progress)
 
@@ -275,6 +300,27 @@ class Nova3DClient:
     async def get_me(self) -> Dict[str, Any]:
         """Verify credentials and return user identity from GET /me."""
         return await self._get("/me")
+
+    async def get_mcp_status(self) -> MCPStatus:
+        """Fetch the canonical MCP onboarding/readiness status."""
+        resp = await self._get("/mcp/status")
+        return MCPStatus(**resp)
+
+    async def exchange_mcp_session_code(self, code: str) -> str:
+        """Exchange a one-time browser handoff code for an MCP credential."""
+        exchange = await self.exchange_mcp_session(code)
+        return exchange.token
+
+    async def exchange_mcp_session(self, code: str) -> MCPSessionExchange:
+        """Exchange a one-time browser handoff code for a token plus metadata."""
+        resp = await self._post("/mcp/session/exchange", json={"code": code.strip()})
+        token = _extract_session_token(resp)
+        if not token:
+            raise Nova3DError("MCP session exchange did not return a Nova3D credential.")
+        expires_at = resp.get("expires_at")
+        if expires_at is not None and not isinstance(expires_at, str):
+            expires_at = str(expires_at)
+        return MCPSessionExchange(token=token, expires_at=expires_at)
 
     async def create_conversation(self, title: str) -> str:
         """Create a new conversation and return its ID."""
@@ -352,20 +398,25 @@ class Nova3DClient:
         self,
         workflow: str,
         payload: Dict[str, Any],
-        return_node: str,
+        return_nodes: list[str],
         conversation_id: Optional[str] = None,
+        relation_type: str = "triggered_by",
+        link_metadata: Optional[Dict[str, Any]] = None,
     ) -> str:
         """Submit a workflow and return the workflow_id."""
         workflow_id = make_workflow_id()
         body: Dict[str, Any] = {
             "payload": payload,
-            "return_nodes": [return_node],
+            "return_nodes": return_nodes,
         }
         if conversation_id:
-            body["conversation"] = {
+            conversation: Dict[str, Any] = {
                 "conversation_id": conversation_id,
-                "relation_type": "triggered_by",
+                "relation_type": relation_type,
             }
+            if link_metadata:
+                conversation["link_metadata"] = link_metadata
+            body["conversation"] = conversation
         try:
             resp = await self._post(
                 f"/run/state/{workflow}",
@@ -539,6 +590,14 @@ def _parse_auth_error(resp: httpx.Response) -> tuple[Optional[str], str]:
         "Nova3D authentication failed. "
         "Check your API key at https://app.nova3d.xyz/api-key"
     )
+
+
+def _extract_session_token(payload: Dict[str, Any]) -> Optional[str]:
+    for key in ("token", "api_key", "n3d_token", "credential"):
+        value = payload.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
 
 
 def _auth_message_for_code(code: Optional[str], backend_message: str) -> str:

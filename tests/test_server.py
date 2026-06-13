@@ -19,6 +19,15 @@ def reset_startup_error():
     server_module._startup_error = None
 
 
+@pytest.fixture(autouse=True)
+def allow_generation_readiness_by_default(monkeypatch):
+    monkeypatch.setattr(
+        server_module,
+        "_require_generation_ready",
+        AsyncMock(return_value=None),
+    )
+
+
 @pytest.mark.asyncio
 async def test_generate_3d_returns_error_when_startup_failed():
     server_module._startup_error = (
@@ -92,7 +101,21 @@ async def test_generate_3d_proceeds_when_no_startup_error(monkeypatch):
     monkeypatch.setenv("NOVA3D_TOKEN", "fake-token")
 
     with respx.mock(base_url="https://nova3d.xyz/api", assert_all_called=False) as mock:
-        mock.get("/workflow/readiness/sketch_to_3d").mock(
+        mock.get("/mcp/status").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "authenticated": True,
+                    "identity": {"user_id": "u1", "email": "user@example.com", "tenant_id": "ten_1"},
+                    "mcp_session": {"established": False, "expires_at": None},
+                    "credits": {"balance": 10, "reserved": 0, "available": 10, "funded": True},
+                    "generation_ready": True,
+                    "next_action": None,
+                    "next_action_url": None,
+                },
+            )
+        )
+        mock.get("/workflow/readiness/sketch_to_3d_v2").mock(
             return_value=httpx.Response(401, json={"detail": {"code": "invalid_api_key", "message": "bad key"}})
         )
         mock.post("/conversations").mock(
@@ -156,8 +179,9 @@ async def test_generate_3d_creates_conversation_and_returns_url(monkeypatch):
     assert snapshot_messages[1]["code_artifact"]["_nova3d_conversation_id"] == "conv-xyz"
     call_kwargs = mock_client.generate.call_args.kwargs
     assert call_kwargs["conversation_id"] == "conv-xyz"
-    assert call_kwargs["provider"] == "gemini"
-    assert call_kwargs["llm"] == "gemini"
+    assert call_kwargs["code_llm_profile"] == "nova3d_code_generation"
+    assert call_kwargs["code_llm_tier"] == "gemini_3_1_pro_google"
+    assert call_kwargs["image_artifact"] is None
 
 
 @pytest.mark.asyncio
@@ -360,9 +384,9 @@ async def test_add_part_propagates_conversation_id(monkeypatch):
 @pytest.mark.asyncio
 async def test_nova3d_setup_returns_url_and_command():
     result = await server_module.nova3d_setup()
-    assert "app.nova3d.xyz/api-key" in result["instructions"]
+    assert "nova3d_login" in result["instructions"]
+    assert "nova3d_status" in result["instructions"]
     assert "claude mcp add nova3d" in result["instructions"]
-    assert "n3d_your-key" in result["instructions"]
 
 
 @pytest.mark.asyncio
@@ -370,7 +394,110 @@ async def test_nova3d_setup_available_when_startup_error_set():
     """Setup instructions must be reachable even with no token configured."""
     server_module._startup_error = "NOVA3D_TOKEN is not set."
     result = await server_module.nova3d_setup()
-    assert "app.nova3d.xyz/api-key" in result["instructions"]
+    assert "nova3d_login" in result["instructions"]
+
+
+@pytest.mark.asyncio
+async def test_nova3d_status_returns_backend_status_payload():
+    status = MagicMock()
+    status.authenticated = True
+    status.generation_ready = False
+    status.next_action = "purchase_credits"
+    status.next_action_url = "https://nova3d.xyz/mcp/no-credits"
+    status.user_message = "Buy credits before generating."
+    status.identity = MagicMock()
+    status.identity.model_dump.return_value = {"email": "user@example.com"}
+    status.credits = MagicMock()
+    status.credits.model_dump.return_value = {"available": 0, "funded": False}
+    status.mcp_session = MagicMock()
+    status.mcp_session.model_dump.return_value = {"established": True, "expires_at": "2026-09-10T14:32:00Z"}
+
+    with patch("nova3d_mcp.server._get_mcp_status", AsyncMock(return_value=status)):
+        result = await server_module.nova3d_status()
+
+    assert result["authenticated"] is True
+    assert result["next_action"] == "purchase_credits"
+    assert result["next_action_url"] == "https://nova3d.xyz/mcp/no-credits"
+    assert result["identity"]["email"] == "user@example.com"
+
+
+@pytest.mark.asyncio
+async def test_nova3d_logout_clears_local_session(monkeypatch, tmp_path):
+    monkeypatch.setenv("NOVA3D_SESSION_PATH", str(tmp_path / "session.json"))
+    monkeypatch.delenv("NOVA3D_TOKEN", raising=False)
+
+    store = server_module._get_session_store()
+    store.save_token("n3d_test_session")
+
+    result = await server_module.nova3d_logout()
+
+    assert result["logged_out"] is True
+    assert result["cleared_local_session"] is True
+    assert store.load_token() is None
+
+
+@pytest.mark.asyncio
+async def test_nova3d_status_includes_stored_session_hint(monkeypatch, tmp_path):
+    monkeypatch.setenv("NOVA3D_SESSION_PATH", str(tmp_path / "session.json"))
+    store = server_module._get_session_store()
+    store.save_session("n3d_test_session", "2026-06-13T12:00:00Z")
+
+    status = MagicMock()
+    status.authenticated = True
+    status.generation_ready = True
+    status.next_action = None
+    status.next_action_url = None
+    status.user_message = "Nova3D is ready."
+    status.identity = None
+    status.credits = None
+    status.mcp_session = MagicMock()
+    status.mcp_session.model_dump.return_value = {"established": True, "expires_at": "2026-06-13T12:00:00Z"}
+
+    with patch("nova3d_mcp.server._get_mcp_status", AsyncMock(return_value=status)):
+        result = await server_module.nova3d_status()
+
+    assert result["stored_session_expires_at"] == "2026-06-13T12:00:00Z"
+    assert "session_reauth_recommended" in result
+
+
+def test_session_store_round_trips_expires_at(tmp_path):
+    from nova3d_mcp.session_store import SessionStore
+
+    store = SessionStore(tmp_path / "session.json")
+    store.save_session("n3d_test_session", "2026-09-10T14:32:00Z")
+
+    assert store.load_token() == "n3d_test_session"
+    assert store.load_expires_at() == "2026-09-10T14:32:00Z"
+
+
+@pytest.mark.asyncio
+async def test_generate_3d_blocks_when_purchase_required():
+    with patch(
+        "nova3d_mcp.server._require_generation_ready",
+        AsyncMock(
+            return_value={
+                "failed": True,
+                "error_message": "Your Nova3D account is connected, but you need credits before generating.",
+                "next_action": "purchase_credits",
+                "next_action_url": "https://nova3d.xyz/mcp/no-credits",
+            }
+        ),
+    ):
+        result = await server_module.generate_3d(prompt="a chair")
+
+    assert result["failed"] is True
+    assert result["next_action"] == "purchase_credits"
+
+
+@pytest.mark.asyncio
+async def test_validate_startup_without_any_token_does_not_set_error(monkeypatch, tmp_path):
+    monkeypatch.delenv("NOVA3D_TOKEN", raising=False)
+    monkeypatch.setenv("NOVA3D_SESSION_PATH", str(tmp_path / "missing.json"))
+    server_module._startup_error = "old"
+
+    await server_module._validate_startup()
+
+    assert server_module._startup_error is None
 
 
 # ── Progress callback tests ───────────────────────────────────────────────────
