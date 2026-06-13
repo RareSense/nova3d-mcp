@@ -55,10 +55,33 @@ class WorkflowState(str, Enum):
         )
 
 
-TERMINAL_NODES = {"success_final", "success_original_glb", "failed_final"}
+TERMINAL_NODES = {
+    "success_final",
+    "success_original_glb",
+    "failed_final",
+    "final_latest_valid",
+    "final_validated_correction",
+    "fail_generation",
+}
 
 NODE_PROGRESS_LABELS: Dict[str, str] = {
     "sketch_to_3d_generator": "Generating your 3D model...",
+    "caption_prompt": "Reading your reference image...",
+    "caption_llm": "Understanding the reference image...",
+    "generation_prompt": "Preparing the 3D generation prompt...",
+    "code_generation_llm": "Writing the Blender scene...",
+    "run_blender": "Building and exporting the 3D model...",
+    "blender_retry_gate": "Checking the generated model...",
+    "build_repair_prompt": "Preparing an automatic repair...",
+    "repair_llm": "Repairing the Blender script...",
+    "capture_validation_screenshots": "Capturing validation views...",
+    "validation_prompt": "Preparing model validation...",
+    "validation_llm": "Reviewing the generated model...",
+    "validation_result_parser": "Finalizing the model...",
+    "validation_correction_blender": "Applying validation fixes...",
+    "final_latest_valid": "Finalizing the model...",
+    "final_validated_correction": "Finalizing the corrected model...",
+    "fail_generation": "Generation failed.",
     "regenerate_3d_part": "Regenerating the selected part...",
     "add_3d_part": "Adding a new part...",
     "articulate_3d_model": "Articulating your 3D model...",
@@ -125,13 +148,75 @@ class GenerationReadiness(BaseModel):
         return "Generation is not available right now."
 
 
+# ── MCP auth/onboarding models ───────────────────────────────────────────────
+
+class MCPStatusIdentity(BaseModel):
+    user_id: str
+    email: str
+    tenant_id: Optional[str] = None
+
+
+class MCPStatusSession(BaseModel):
+    established: bool = False
+    expires_at: Optional[str] = None
+
+
+class MCPStatusCredits(BaseModel):
+    balance: int = 0
+    reserved: int = 0
+    available: int = 0
+    funded: bool = False
+
+
+class MCPStatus(BaseModel):
+    authenticated: bool = False
+    identity: Optional[MCPStatusIdentity] = None
+    mcp_session: MCPStatusSession = Field(default_factory=MCPStatusSession)
+    credits: Optional[MCPStatusCredits] = None
+    generation_ready: bool = False
+    next_action: Optional[str] = None
+    next_action_url: Optional[str] = None
+
+    @property
+    def is_ready(self) -> bool:
+        return self.authenticated and self.generation_ready and self.next_action is None
+
+    @property
+    def available_credits(self) -> Optional[int]:
+        return self.credits.available if self.credits else None
+
+    @property
+    def user_message(self) -> str:
+        if self.next_action == "sign_in":
+            return "Sign in to Nova3D to continue."
+        if self.next_action == "session_expired":
+            return "Your Nova3D session expired. Sign in again to continue."
+        if self.next_action == "purchase_credits":
+            return "Your Nova3D account is connected, but you need credits before generating."
+        if self.next_action == "service_unavailable":
+            return "Nova3D is temporarily unavailable. Please try again shortly."
+        if self.is_ready:
+            if self.identity and self.credits:
+                return (
+                    f"Connected as {self.identity.email}. "
+                    f"Credits available: {self.credits.available}."
+                )
+            return "Nova3D is ready."
+        if self.authenticated:
+            return "Nova3D is connected, but readiness is still being confirmed."
+        return "Nova3D status is unavailable."
+
+
 # ── Generation result ─────────────────────────────────────────────────────────
 
 RESULT_NODE_KEYS = [
+    "final_validated_correction",
+    "final_latest_valid",
     "sketch_to_3d_generator",
     "regenerate_3d_part",
     "add_3d_part",
     "articulate_3d_model",
+    "fail_generation",
 ]
 
 
@@ -168,7 +253,7 @@ class GenerationResult(BaseModel):
 
         unwrapped = _unwrap_result(payload)
         glb_url = _extract_glb_url(unwrapped)
-        model_artifact = _extract_map(unwrapped, ["model_artifact", "model"])
+        model_artifact = _extract_map(unwrapped, ["model_artifact", "model", "glb_artifact"])
         code_artifact = _extract_map(
             unwrapped,
             ["code_artifact", "source_code_artifact", "input_code_artifact"],
@@ -223,7 +308,7 @@ def _extract_glb_url(unwrapped: Dict[str, Any]) -> Optional[str]:
     url = unwrapped.get("model_url")
     if isinstance(url, str) and url.strip():
         return url.strip()
-    for key in ["model_artifact", "model"]:
+    for key in ["model", "model_artifact", "glb_artifact"]:
         artifact = unwrapped.get(key)
         if isinstance(artifact, dict):
             u = artifact.get("url")
