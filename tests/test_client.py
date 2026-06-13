@@ -337,13 +337,26 @@ async def test_get_mcp_status_success(mock_api):
 @pytest.mark.asyncio
 async def test_exchange_mcp_session_code_success(mock_api):
     mock_api.post("/mcp/session/exchange").mock(
-        return_value=httpx.Response(200, json={"api_key": "n3d_test_session"})
+        return_value=httpx.Response(200, json={"token": "n3d_test_session", "expires_at": "2026-09-10T14:32:00Z"})
     )
 
     async with Nova3DClient(token=None, base_url=BASE_URL) as client:
         token = await client.exchange_mcp_session_code("session-code")
 
     assert token == "n3d_test_session"
+
+
+@pytest.mark.asyncio
+async def test_exchange_mcp_session_returns_expires_at(mock_api):
+    mock_api.post("/mcp/session/exchange").mock(
+        return_value=httpx.Response(200, json={"token": "n3d_test_session", "expires_at": "2026-09-10T14:32:00Z"})
+    )
+
+    async with Nova3DClient(token=None, base_url=BASE_URL) as client:
+        exchange = await client.exchange_mcp_session("session-code")
+
+    assert exchange.token == "n3d_test_session"
+    assert exchange.expires_at == "2026-09-10T14:32:00Z"
 
 
 @pytest.mark.asyncio

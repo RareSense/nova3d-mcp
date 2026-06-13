@@ -17,6 +17,7 @@ LOGIN_TIMEOUT_SECONDS = 300.0
 @dataclass
 class LoginResult:
     token: str
+    expires_at: Optional[str]
     status: MCPStatus
     connect_url: str
     port: int
@@ -65,15 +66,16 @@ class Nova3DAuthenticator:
             raise Nova3DError("Nova3D sign-in callback did not include a session code.")
 
         async with Nova3DClient(token=None, base_url=self._base_url) as client:
-            token = await client.exchange_mcp_session_code(callback.code)
+            exchange = await client.exchange_mcp_session(callback.code)
 
-        self._session_store.save_token(token)
+        self._session_store.save_session(exchange.token, exchange.expires_at)
 
-        async with Nova3DClient(token=token, base_url=self._base_url) as client:
+        async with Nova3DClient(token=exchange.token, base_url=self._base_url) as client:
             status = await client.get_mcp_status()
 
         return LoginResult(
-            token=token,
+            token=exchange.token,
+            expires_at=exchange.expires_at,
             status=status,
             connect_url=connect_url,
             port=port,

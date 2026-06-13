@@ -22,6 +22,7 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
+from datetime import datetime, timedelta, timezone
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from dotenv import load_dotenv
@@ -183,6 +184,33 @@ async def _get_mcp_status() -> MCPStatus:
     token = _get_session_store().load_token() or _get_manual_token()
     async with Nova3DClient(token=token, base_url=_get_api_url()) as client:
         return await client.get_mcp_status()
+
+
+def _build_session_hint(session_store: SessionStore) -> Dict[str, Any]:
+    expires_at = session_store.load_expires_at()
+    if not expires_at:
+        return {}
+    hint: Dict[str, Any] = {"stored_session_expires_at": expires_at}
+    parsed = _parse_iso_datetime(expires_at)
+    if parsed is not None:
+        now = datetime.now(timezone.utc)
+        hint["session_reauth_recommended"] = parsed <= (now + timedelta(days=1))
+    return hint
+
+
+def _parse_iso_datetime(value: str) -> Optional[datetime]:
+    normalized = value.strip()
+    if not normalized:
+        return None
+    if normalized.endswith("Z"):
+        normalized = normalized[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
 
 
 async def _require_generation_ready() -> Optional[Dict[str, Any]]:
@@ -371,6 +399,7 @@ def _status_payload(status: MCPStatus) -> Dict[str, Any]:
         payload["identity"] = status.identity.model_dump()
     if status.credits is not None:
         payload["credits"] = status.credits.model_dump()
+    payload.update(_build_session_hint(_get_session_store()))
     return payload
 
 
@@ -426,6 +455,8 @@ async def nova3d_login() -> Dict[str, Any]:
     payload = _status_payload(result.status)
     payload["browser_url"] = result.connect_url
     payload["local_session_path"] = str(_get_session_store().path)
+    if result.expires_at:
+        payload["stored_session_expires_at"] = result.expires_at
     return payload
 
 

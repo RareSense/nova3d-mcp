@@ -20,6 +20,7 @@ from nova3d_mcp.conversation import (
 from nova3d_mcp.models import (
     GenerationReadiness,
     GenerationResult,
+    MCPSessionExchange,
     MCPStatus,
     WorkflowStatus,
 )
@@ -307,11 +308,19 @@ class Nova3DClient:
 
     async def exchange_mcp_session_code(self, code: str) -> str:
         """Exchange a one-time browser handoff code for an MCP credential."""
+        exchange = await self.exchange_mcp_session(code)
+        return exchange.token
+
+    async def exchange_mcp_session(self, code: str) -> MCPSessionExchange:
+        """Exchange a one-time browser handoff code for a token plus metadata."""
         resp = await self._post("/mcp/session/exchange", json={"code": code.strip()})
         token = _extract_session_token(resp)
         if not token:
             raise Nova3DError("MCP session exchange did not return a Nova3D credential.")
-        return token
+        expires_at = resp.get("expires_at")
+        if expires_at is not None and not isinstance(expires_at, str):
+            expires_at = str(expires_at)
+        return MCPSessionExchange(token=token, expires_at=expires_at)
 
     async def create_conversation(self, title: str) -> str:
         """Create a new conversation and return its ID."""
