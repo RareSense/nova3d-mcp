@@ -437,6 +437,40 @@ async def test_nova3d_logout_clears_local_session(monkeypatch, tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_nova3d_status_includes_stored_session_hint(monkeypatch, tmp_path):
+    monkeypatch.setenv("NOVA3D_SESSION_PATH", str(tmp_path / "session.json"))
+    store = server_module._get_session_store()
+    store.save_session("n3d_test_session", "2026-06-13T12:00:00Z")
+
+    status = MagicMock()
+    status.authenticated = True
+    status.generation_ready = True
+    status.next_action = None
+    status.next_action_url = None
+    status.user_message = "Nova3D is ready."
+    status.identity = None
+    status.credits = None
+    status.mcp_session = MagicMock()
+    status.mcp_session.model_dump.return_value = {"established": True, "expires_at": "2026-06-13T12:00:00Z"}
+
+    with patch("nova3d_mcp.server._get_mcp_status", AsyncMock(return_value=status)):
+        result = await server_module.nova3d_status()
+
+    assert result["stored_session_expires_at"] == "2026-06-13T12:00:00Z"
+    assert "session_reauth_recommended" in result
+
+
+def test_session_store_round_trips_expires_at(tmp_path):
+    from nova3d_mcp.session_store import SessionStore
+
+    store = SessionStore(tmp_path / "session.json")
+    store.save_session("n3d_test_session", "2026-09-10T14:32:00Z")
+
+    assert store.load_token() == "n3d_test_session"
+    assert store.load_expires_at() == "2026-09-10T14:32:00Z"
+
+
+@pytest.mark.asyncio
 async def test_generate_3d_blocks_when_purchase_required():
     with patch(
         "nova3d_mcp.server._require_generation_ready",

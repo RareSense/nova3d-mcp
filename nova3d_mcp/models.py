@@ -207,6 +207,11 @@ class MCPStatus(BaseModel):
         return "Nova3D status is unavailable."
 
 
+class MCPSessionExchange(BaseModel):
+    token: str
+    expires_at: Optional[str] = None
+
+
 # ── Generation result ─────────────────────────────────────────────────────────
 
 RESULT_NODE_KEYS = [
