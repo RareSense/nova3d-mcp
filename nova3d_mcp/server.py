@@ -7,7 +7,7 @@ Exposes Nova3D's structured 3D generation pipeline as MCP tools
 callable from Claude Code, Cursor, and any MCP-compatible agent.
 
 Configuration (environment variables):
-    NOVA3D_TOKEN      — JWT from nova3d.xyz (required)
+    NOVA3D_TOKEN      — Advanced/manual Nova3D API key fallback (optional)
     NOVA3D_API_URL    — Override API base URL (optional)
     NOVA3D_APP_URL    — Override app URL for conversation links (optional)
 
@@ -28,13 +28,14 @@ from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP
 from mcp.server.fastmcp.server import Context
 
+from nova3d_mcp.auth import Nova3DAuthenticator
 from nova3d_mcp.client import Nova3DClient, Nova3DAuthError, Nova3DError
 from nova3d_mcp.conversation import (
     build_edit_message,
     build_generation_messages,
 )
-from nova3d_mcp.models import GenerationResult
-from nova3d_mcp.models import WorkflowStatus
+from nova3d_mcp.models import GenerationResult, MCPStatus, WorkflowStatus
+from nova3d_mcp.session_store import SessionStore
 
 load_dotenv()
 
@@ -48,27 +49,37 @@ _MODEL_OPTIONS: Dict[str, Dict[str, str]] = {
     "gemini": {
         "provider": "gemini",
         "llm": "gemini",
-        "option_id": "gemini_gemini",
+        "code_llm_profile": "nova3d_code_generation",
+        "code_llm_tier": "gemini_3_1_pro_google",
+        "option_id": "credits_gemini_3_1_pro_google",
     },
     "claude-sonnet": {
         "provider": "anthropic",
         "llm": "claude-sonnet",
-        "option_id": "anthropic_claude_sonnet",
+        "code_llm_profile": "nova3d_code_generation",
+        "code_llm_tier": "claude_sonnet_4_6_anthropic",
+        "option_id": "credits_claude_sonnet_4_6_anthropic",
     },
     "claude-opus": {
         "provider": "anthropic",
         "llm": "claude-opus",
-        "option_id": "anthropic_claude_opus",
+        "code_llm_profile": "nova3d_code_generation",
+        "code_llm_tier": "claude_opus_4_8_anthropic",
+        "option_id": "credits_claude_opus_4_8_anthropic",
     },
     "claude-opus-latest": {
         "provider": "anthropic",
         "llm": "claude-opus-latest",
-        "option_id": "anthropic_claude_opus_latest",
+        "code_llm_profile": "nova3d_code_generation",
+        "code_llm_tier": "claude_opus_4_8_anthropic",
+        "option_id": "credits_claude_opus_4_8_anthropic",
     },
     "gpt-5.5": {
         "provider": "openai",
         "llm": "gpt55",
-        "option_id": "openai_gpt55",
+        "code_llm_profile": "nova3d_code_generation",
+        "code_llm_tier": "gpt_5_5_openrouter",
+        "option_id": "credits_gpt_5_5_openrouter",
     },
 }
 _DEFAULT_MODEL = "gemini"
@@ -90,6 +101,9 @@ mcp = FastMCP(
         "code_artifact, and "
         "conversation_url. Always surface conversation_url to the user — it opens "
         "a browser view of the asset and its full edit history in the Nova3D app.\n"
+        "   - Initial generation runs through Nova3D's paid GraphFlow v2 path.\n"
+        "   - The model selector routes to a paid Nova3D tier; this MCP server does "
+        "not expose BYOK provider-key generation.\n"
         "2. Call regenerate_part, add_part, or articulate_model with the "
         "code_artifact from any prior result. These tools return an updated glb_url "
         "and the same conversation_url, linking all edits into one session.\n"
@@ -97,11 +111,11 @@ mcp = FastMCP(
         "creation failed silently at generate time; generation still succeeded.\n"
         "   - Always pass the most recent code_artifact forward — it carries session "
         "state that links edits together.\n\n"
-        "SETUP: This server requires one credential:\n"
-        "NOVA3D_TOKEN — a Nova3D API key. If the user has not set this, "
-        "proactively tell them: 'To use Nova3D, you need an API key. "
-        "Get one at https://app.nova3d.xyz/api-key, then run: "
-        "claude mcp add nova3d -e NOVA3D_TOKEN=n3d_your-key -- uvx nova3d-mcp'\n"
+        "SETUP:\n"
+        "1. Preferred: Call nova3d_login to sign in through the browser.\n"
+        "2. Check nova3d_status to confirm credits and readiness before generation.\n"
+        "3. Advanced fallback: you may still provide NOVA3D_TOKEN manually in "
+        "non-interactive environments.\n"
         "\n"
         "If any tool returns {\"failed\": true}, surface the error_message to the user verbatim."
     ),
@@ -110,15 +124,26 @@ mcp = FastMCP(
 
 # ── Auth helper ───────────────────────────────────────────────────────────────
 
-def _get_token() -> str:
+def _get_session_store() -> SessionStore:
+    return SessionStore()
+
+
+def _get_manual_token() -> Optional[str]:
     token = os.environ.get("NOVA3D_TOKEN", "").strip()
-    if not token:
-        raise Nova3DError(
-            "NOVA3D_TOKEN is not set. "
-            "Get an API key at https://app.nova3d.xyz/api-key "
-            "and add it with: claude mcp add nova3d -e NOVA3D_TOKEN=n3d_your-key -- uvx nova3d-mcp"
-        )
-    return token
+    return token or None
+
+
+def _get_token() -> str:
+    session_token = _get_session_store().load_token()
+    if session_token:
+        return session_token
+    manual_token = _get_manual_token()
+    if manual_token:
+        return manual_token
+    raise Nova3DError(
+        "Sign in to Nova3D with nova3d_login to continue. "
+        "Advanced fallback: set NOVA3D_TOKEN manually in your MCP config."
+    )
 
 
 def _get_api_url() -> str:
@@ -130,20 +155,12 @@ def _get_app_url() -> str:
 
 
 async def _validate_startup() -> None:
-    """Validate NOVA3D_TOKEN against GET /api/me. Stores error in _startup_error instead of exiting."""
+    """Validate an existing configured credential if one is present."""
     global _startup_error
 
-    token = os.environ.get("NOVA3D_TOKEN", "").strip()
+    token = _get_session_store().load_token() or _get_manual_token()
     if not token:
-        _startup_error = (
-            "NOVA3D_TOKEN is not set. "
-            "Get an API key at https://app.nova3d.xyz/api-key, "
-            "then set it as NOVA3D_TOKEN in your MCP config and restart."
-        )
-        print(
-            f"Nova3D: {_startup_error}",
-            file=sys.stderr,
-        )
+        _startup_error = None
         return
 
     base_url = _get_api_url()
@@ -152,14 +169,41 @@ async def _validate_startup() -> None:
             me = await client.get_me()
         print(f"✓ Nova3D authenticated: {me['email']}", file=sys.stderr)
     except Nova3DAuthError as e:
-        _startup_error = str(e)
-        print(_startup_error, file=sys.stderr)
+        _startup_error = None
+        print(f"Nova3D: {e}", file=sys.stderr)
     except Nova3DError as e:
         _startup_error = (
             f"Could not reach Nova3D to verify token: {e}\n"
             "Check your connection and try again."
         )
         print(_startup_error, file=sys.stderr)
+
+
+async def _get_mcp_status() -> MCPStatus:
+    token = _get_session_store().load_token() or _get_manual_token()
+    async with Nova3DClient(token=token, base_url=_get_api_url()) as client:
+        return await client.get_mcp_status()
+
+
+async def _require_generation_ready() -> Optional[Dict[str, Any]]:
+    status = await _get_mcp_status()
+    if status.next_action is None and status.generation_ready and status.authenticated:
+        return None
+
+    response: Dict[str, Any] = {
+        "failed": True,
+        "error_message": status.user_message,
+        "next_action": status.next_action,
+    }
+    if status.next_action_url:
+        response["next_action_url"] = status.next_action_url
+    if status.identity is not None:
+        response["identity"] = status.identity.model_dump()
+    if status.credits is not None:
+        response["credits"] = status.credits.model_dump()
+    if status.mcp_session is not None:
+        response["mcp_session"] = status.mcp_session.model_dump()
+    return response
 
 
 # ── Progress helper ───────────────────────────────────────────────────────────
@@ -222,6 +266,16 @@ def _conversation_url(app_url: str, conversation_id: Optional[str]) -> Optional[
     if not conversation_id:
         return None
     return f"{app_url}/chat/{conversation_id}"
+
+
+def _build_image_artifact(
+    image_base64: Optional[str],
+    image_mime: Optional[str],
+) -> Optional[List[str]]:
+    if not image_base64:
+        return None
+    mime = (image_mime or "image/png").strip() or "image/png"
+    return [f"data:{mime};base64,{image_base64.strip()}"]
 
 
 async def _persist_generation_history(
@@ -304,6 +358,22 @@ async def _append_and_link_messages(
             )
 
 
+def _status_payload(status: MCPStatus) -> Dict[str, Any]:
+    payload: Dict[str, Any] = {
+        "authenticated": status.authenticated,
+        "generation_ready": status.generation_ready,
+        "next_action": status.next_action,
+        "next_action_url": status.next_action_url,
+        "user_message": status.user_message,
+        "mcp_session": status.mcp_session.model_dump(),
+    }
+    if status.identity is not None:
+        payload["identity"] = status.identity.model_dump()
+    if status.credits is not None:
+        payload["credits"] = status.credits.model_dump()
+    return payload
+
+
 # ── Tools ─────────────────────────────────────────────────────────────────────
 
 @mcp.tool()
@@ -311,19 +381,69 @@ async def nova3d_setup() -> Dict[str, Any]:
     """
     Get setup instructions for Nova3D.
 
-    Call this if the user asks how to get started, needs an API key,
-    or hasn't configured NOVA3D_TOKEN yet.
+    Call this if the user asks how to get started or needs the sign-in flow.
 
     Returns:
         instructions: Step-by-step setup guide with URL and install command.
     """
     instructions = (
-        "To use Nova3D you need one thing:\n"
-        "A Nova3D API key — get one at https://app.nova3d.xyz/api-key\n\n"
-        "Once you have it, run:\n"
+        "Preferred setup:\n"
+        "1. Call nova3d_login to sign in through your browser.\n"
+        "2. Call nova3d_status to confirm credits and readiness.\n"
+        "3. If credits are required, use the purchase link returned by nova3d_status.\n\n"
+        "Advanced/manual fallback:\n"
         "claude mcp add nova3d -e NOVA3D_TOKEN=n3d_your-key -- uvx nova3d-mcp"
     )
     return {"instructions": instructions}
+
+
+@mcp.tool()
+async def nova3d_status() -> Dict[str, Any]:
+    """
+    Get the canonical Nova3D onboarding and readiness state.
+
+    Use this before generation, after sign-in, or after purchasing credits.
+    """
+    status = await _get_mcp_status()
+    return _status_payload(status)
+
+
+@mcp.tool()
+async def nova3d_login() -> Dict[str, Any]:
+    """
+    Sign in to Nova3D through the browser and establish a local MCP session.
+
+    This is the preferred onboarding path. It starts a loopback callback flow,
+    exchanges the one-time session code for an MCP credential, stores it locally,
+    and returns the resulting readiness state.
+    """
+    authenticator = Nova3DAuthenticator(
+        base_url=_get_api_url(),
+        app_url=_get_app_url(),
+        session_store=_get_session_store(),
+    )
+    result = await authenticator.login()
+    payload = _status_payload(result.status)
+    payload["browser_url"] = result.connect_url
+    payload["local_session_path"] = str(_get_session_store().path)
+    return payload
+
+
+@mcp.tool()
+async def nova3d_logout() -> Dict[str, Any]:
+    """
+    Clear the locally stored MCP session credential.
+
+    This does not remove an advanced/manual NOVA3D_TOKEN from the MCP config.
+    """
+    store = _get_session_store()
+    had_session = store.load_token() is not None
+    store.clear()
+    return {
+        "logged_out": True,
+        "cleared_local_session": had_session,
+        "manual_token_still_configured": _get_manual_token() is not None,
+    }
 
 
 @mcp.tool()
@@ -337,6 +457,10 @@ async def generate_3d(
     """
     Generate a structured, part-aware 3D asset from a text prompt.
 
+    Initial generation uses Nova3D's paid GraphFlow v2 workflow. The selected
+    model routes to a Nova3D-managed paid tier; this MCP tool does not expose
+    BYOK provider-key generation.
+
     Nova3D writes Blender Python construction code, executes it server-side,
     validates spatial structure, and exports a GLB with named, separately
     addressable parts — not a fused mesh blob.
@@ -345,9 +469,11 @@ async def generate_3d(
         prompt:       Description of the 3D asset. Be specific about parts.
                       Example: "a washing machine with drum, door, control panel,
                       and hose connectors"
-        model:        LLM model to use. One of: "gemini" (default), "claude-sonnet",
-                      "claude-opus", "claude-opus-latest", "gpt-5.5".
-        image_base64: Optional reference image as plain base64 (not a data URL).
+        model:        Paid Nova3D routing preset. One of: "gemini" (default),
+                      "claude-sonnet", "claude-opus", "claude-opus-latest",
+                      "gpt-5.5".
+        image_base64: Optional reference image as plain base64. The MCP server
+                      converts this into the v2 image_artifact data-URL format.
         image_mime:   MIME type of the reference image e.g. "image/jpeg".
 
     Returns:
@@ -366,6 +492,9 @@ async def generate_3d(
     """
     if _startup_error:
         return {"failed": True, "error_message": _startup_error}
+    readiness_error = await _require_generation_ready()
+    if readiness_error is not None:
+        return readiness_error
     model_opts = _resolve_model(model)
     if model_opts is None:
         valid = ", ".join(_MODEL_OPTIONS)
@@ -383,10 +512,9 @@ async def generate_3d(
 
         result = await client.generate(
             prompt=prompt,
-            provider=model_opts["provider"],
-            llm=model_opts["llm"],
-            image_base64=image_base64,
-            image_mime=image_mime,
+            code_llm_profile=model_opts["code_llm_profile"],
+            code_llm_tier=model_opts["code_llm_tier"],
+            image_artifact=_build_image_artifact(image_base64, image_mime),
             conversation_id=conversation_id,
             on_progress=_make_progress_callback(ctx),
         )

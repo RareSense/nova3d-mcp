@@ -54,23 +54,12 @@ currently ship an embedded IDE-native 3D viewport.
 
 ## Quickstart
 
-### 1. Get an API key
-
-Get an API key at: https://app.nova3d.xyz/api-key
-
-```bash
-export NOVA3D_TOKEN="n3d_your-api-key-here"
-```
-
-API keys never expire unless revoked. The MCP server validates your key on startup
-and prints a clear error if it's missing or invalid.
-
-### 2. Install in your MCP client
+### 1. Install in your MCP client
 
 #### Codex
 
 ```bash
-codex mcp add nova3d --env NOVA3D_TOKEN=n3d_your-api-key-here -- uvx nova3d-mcp
+codex mcp add nova3d -- uvx nova3d-mcp
 ```
 
 Codex also supports MCP configuration through `~/.codex/config.toml`. If you
@@ -80,7 +69,7 @@ at the same stdio command: `uvx nova3d-mcp`.
 #### Claude Code
 
 ```bash
-claude mcp add nova3d -e NOVA3D_TOKEN=n3d_your-api-key-here -- uvx nova3d-mcp
+claude mcp add nova3d -- uvx nova3d-mcp
 ```
 
 #### Cursor
@@ -93,10 +82,7 @@ install:
   "mcpServers": {
     "nova3d": {
       "command": "uvx",
-      "args": ["nova3d-mcp"],
-      "env": {
-        "NOVA3D_TOKEN": "n3d_your-api-key-here"
-      }
+      "args": ["nova3d-mcp"]
     }
   }
 }
@@ -107,7 +93,7 @@ install:
 Option A: add the server from the command line:
 
 ```bash
-code --add-mcp "{\"name\":\"nova3d\",\"command\":\"uvx\",\"args\":[\"nova3d-mcp\"],\"env\":{\"NOVA3D_TOKEN\":\"n3d_your-api-key-here\"}}"
+code --add-mcp "{\"name\":\"nova3d\",\"command\":\"uvx\",\"args\":[\"nova3d-mcp\"]}"
 ```
 
 Option B: create `.vscode/mcp.json` in your workspace:
@@ -117,10 +103,7 @@ Option B: create `.vscode/mcp.json` in your workspace:
   "servers": {
     "nova3d": {
       "command": "uvx",
-      "args": ["nova3d-mcp"],
-      "env": {
-        "NOVA3D_TOKEN": "n3d_your-api-key-here"
-      }
+      "args": ["nova3d-mcp"]
     }
   }
 }
@@ -137,18 +120,14 @@ Create `<SOLUTIONDIR>/.mcp.json` or `%USERPROFILE%/.mcp.json`:
   "servers": {
     "nova3d": {
       "command": "uvx",
-      "args": ["nova3d-mcp"],
-      "env": {
-        "NOVA3D_TOKEN": "n3d_your-api-key-here"
-      }
+      "args": ["nova3d-mcp"]
     }
   }
 }
 ```
 
 You can also add the server from the Visual Studio MCP UI by providing the
-stdio command `uvx` with args `["nova3d-mcp"]` and the `NOVA3D_TOKEN`
-environment variable.
+stdio command `uvx` with args `["nova3d-mcp"]`.
 
 ### 3. Generate
 
@@ -192,10 +171,11 @@ The agent calls `generate_3d`. You get back:
 ## Configuration notes
 
 - `conversation_url` is the standard supported way to inspect generated assets — it opens your fully hydrated editing session in the Nova3D app.
+- Preferred onboarding is browser sign-in through `nova3d_login`, then `nova3d_status` to confirm credits/readiness.
 - Keep secrets out of checked-in workspace config when possible. Prefer
   per-user configuration files or client-managed environment variables.
 - If your editor supports source-controlled MCP config, commit the server entry
-  and inject `NOVA3D_TOKEN` per-user.
+  and inject `NOVA3D_TOKEN` per-user only for the advanced/manual fallback path.
 
 ---
 
@@ -203,8 +183,9 @@ The agent calls `generate_3d`. You get back:
 
 | Problem | What to check |
 |---|---|
-| `NOVA3D_TOKEN is not set` | Add `NOVA3D_TOKEN` to your MCP server environment and restart the client |
-| Auth failure on startup | Confirm the key at https://app.nova3d.xyz/api-key |
+| Prompted to sign in before generation | Call `nova3d_login`, then re-check with `nova3d_status` |
+| Told that credits are required | Follow the purchase link returned by `nova3d_status` |
+| Auth failure on startup | Sign in again with `nova3d_login`, or confirm the manual key at https://app.nova3d.xyz/api-key |
 | `uvx` not found | Install `uv` or use a local `nova3d-mcp` executable from a virtualenv |
 | No 3D preview inside the editor | Open the returned `conversation_url` in the browser; that is the supported preview path |
 
@@ -215,12 +196,14 @@ The agent calls `generate_3d`. You get back:
 ### `generate_3d`
 
 Generate a structured 3D asset from text (and optional reference image).
+Initial generation runs through Nova3D's paid GraphFlow v2 workflow. This MCP
+server does not expose BYOK/provider-key generation.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `prompt` | string | ✓ | Asset description. Be specific about parts. |
-| `model` | string | | `"gemini"` (default) · `"claude-sonnet"` · `"claude-opus"` · `"claude-opus-latest"` · `"gpt-5.5"` |
-| `image_base64` | string | | Reference image as plain base64 |
+| `model` | string | | Paid routing preset: `"gemini"` (default) · `"claude-sonnet"` · `"claude-opus"` · `"claude-opus-latest"` · `"gpt-5.5"` |
+| `image_base64` | string | | Reference image as plain base64; the server converts it to the v2 `image_artifact` data-URL format |
 | `image_mime` | string | | e.g. `"image/jpeg"` |
 
 **Returns:** `glb_url`, `conversation_url`, `parts`, `joint_count`, `code_artifact`, `model_artifact`, `workflow_id`. Pass `code_artifact` to any edit tool. Open `conversation_url` to see the full edit history for this asset in the Nova3D app.
@@ -281,6 +264,26 @@ Check the status of a running workflow by ID.
 
 ---
 
+### `nova3d_login`
+
+Start the preferred browser-based Nova3D sign-in flow and store a local MCP session.
+
+---
+
+### `nova3d_status`
+
+Return the canonical Nova3D onboarding/readiness state, including identity,
+credits, generation readiness, and the next recommended action.
+
+---
+
+### `nova3d_logout`
+
+Clear the locally stored MCP session. This does not remove an advanced/manual
+`NOVA3D_TOKEN` from your MCP config.
+
+---
+
 ## Typical workflow
 
 ```
@@ -320,7 +323,7 @@ All edit tools accept the `code_artifact` from any prior result and return an up
 
 | Variable | Required | Description |
 |---|---|---|
-| `NOVA3D_TOKEN` | ✓ | API key from https://app.nova3d.xyz/api-key (recommended) or session JWT |
+| `NOVA3D_TOKEN` | | Advanced/manual fallback API key from https://app.nova3d.xyz/api-key |
 | `NOVA3D_API_URL` | | Override API base URL (default: `https://nova3d.xyz/api`) |
 | `NOVA3D_APP_URL` | | Override app URL for conversation links (default: `https://app.nova3d.xyz`) |
 
