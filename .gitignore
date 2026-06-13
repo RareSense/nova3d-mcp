@@ -10,4 +10,4 @@ build/
 *.pth
 .env
 .claude/
-docs/superpowers/
+docs/
