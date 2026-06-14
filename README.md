@@ -172,6 +172,7 @@ The agent calls `generate_3d`. You get back:
 
 - `conversation_url` is the standard supported way to inspect generated assets — it opens your fully hydrated editing session in the Nova3D app.
 - Preferred onboarding is browser sign-in through `nova3d_login`, then `nova3d_status` to confirm credits/readiness.
+- `nova3d_login` opens a browser tab and may wait for a local loopback callback before it completes.
 - Keep secrets out of checked-in workspace config when possible. Prefer
   per-user configuration files or client-managed environment variables.
 - If your editor supports source-controlled MCP config, commit the server entry
@@ -184,6 +185,7 @@ The agent calls `generate_3d`. You get back:
 | Problem | What to check |
 |---|---|
 | Prompted to sign in before generation | Call `nova3d_login`, then re-check with `nova3d_status` |
+| Browser sign-in finished but `nova3d_login` did not confirm completion | Call `nova3d_status` now. If it still shows not signed in, retry `nova3d_login` |
 | Told that credits are required | Follow the purchase link returned by `nova3d_status` |
 | Auth failure on startup | Sign in again with `nova3d_login`, or confirm the manual key at https://app.nova3d.xyz/api-key |
 | `uvx` not found | Install `uv` or use a local `nova3d-mcp` executable from a virtualenv |
@@ -267,6 +269,8 @@ Check the status of a running workflow by ID.
 ### `nova3d_login`
 
 Start the preferred browser-based Nova3D sign-in flow and store a local MCP session.
+This opens a browser tab. If the browser flow finishes but local completion is
+ambiguous, call `nova3d_status` before using manual token fallback.
 
 ---
 

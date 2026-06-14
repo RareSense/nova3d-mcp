@@ -29,7 +29,7 @@ from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP
 from mcp.server.fastmcp.server import Context
 
-from nova3d_mcp.auth import Nova3DAuthenticator
+from nova3d_mcp.auth import Nova3DAuthenticator, Nova3DLoginError
 from nova3d_mcp.client import Nova3DClient, Nova3DAuthError, Nova3DError
 from nova3d_mcp.conversation import (
     build_edit_message,
@@ -259,6 +259,23 @@ def _make_progress_callback(
     return on_progress
 
 
+def _make_login_progress_callback(
+    ctx: Optional[Context],
+) -> Callable[[str], Awaitable[None]]:
+    counter: List[int] = [0]
+
+    async def on_progress(message: str) -> None:
+        counter[0] += 1
+        if ctx:
+            await ctx.report_progress(
+                progress=counter[0],
+                total=None,
+                message=message,
+            )
+
+    return on_progress
+
+
 # ── Conversation linking helpers ──────────────────────────────────────────────
 
 def _extract_conversation_id(code_artifact: Optional[Dict[str, Any]]) -> Optional[str]:
@@ -418,8 +435,10 @@ async def nova3d_setup() -> Dict[str, Any]:
     instructions = (
         "Preferred setup:\n"
         "1. Call nova3d_login to sign in through your browser.\n"
-        "2. Call nova3d_status to confirm credits and readiness.\n"
-        "3. If credits are required, use the purchase link returned by nova3d_status.\n\n"
+        "2. Complete the Nova3D sign-in flow in the browser tab that opens.\n"
+        "3. Then call nova3d_status to confirm credits and readiness.\n"
+        "4. If credits are required, use the purchase link returned by nova3d_status.\n"
+        "5. Manual NOVA3D_TOKEN setup is advanced fallback only if browser/loopback auth is unavailable.\n\n"
         "Advanced/manual fallback:\n"
         "claude mcp add nova3d -e NOVA3D_TOKEN=n3d_your-key -- uvx nova3d-mcp"
     )
@@ -438,20 +457,43 @@ async def nova3d_status() -> Dict[str, Any]:
 
 
 @mcp.tool()
-async def nova3d_login() -> Dict[str, Any]:
+async def nova3d_login(ctx: Optional[Context] = None) -> Dict[str, Any]:
     """
     Sign in to Nova3D through the browser and establish a local MCP session.
 
     This is the preferred onboarding path. It starts a loopback callback flow,
-    exchanges the one-time session code for an MCP credential, stores it locally,
-    and returns the resulting readiness state.
+    opens a browser tab, waits for the local loopback callback, exchanges the
+    one-time session code for an MCP credential, stores it locally, and returns
+    the resulting readiness state.
+
+    If browser sign-in finishes but local completion is ambiguous, call
+    nova3d_status before falling back to manual NOVA3D_TOKEN setup.
     """
     authenticator = Nova3DAuthenticator(
         base_url=_get_api_url(),
         app_url=_get_app_url(),
         session_store=_get_session_store(),
     )
-    result = await authenticator.login()
+    try:
+        result = await authenticator.login_with_progress(
+            on_progress=_make_login_progress_callback(ctx),
+        )
+    except Nova3DLoginError as e:
+        payload: Dict[str, Any] = {
+            "failed": True,
+            "error_message": str(e),
+        }
+        if e.browser_url:
+            payload["browser_url"] = e.browser_url
+        if e.should_check_status:
+            payload["suggested_next_step"] = "call nova3d_status"
+            payload["recovery_instructions"] = (
+                "If you completed sign-in in the browser, call nova3d_status now. "
+                "If status still shows not signed in, retry nova3d_login."
+            )
+        if e.manual_fallback_only:
+            payload["manual_fallback_available"] = True
+        return payload
     payload = _status_payload(result.status)
     payload["browser_url"] = result.connect_url
     payload["local_session_path"] = str(_get_session_store().path)

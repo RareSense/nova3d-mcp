@@ -19,6 +19,7 @@ claude mcp add nova3d -- uvx nova3d-mcp
 Preferred onboarding after install:
 
 - call `nova3d_login` to sign in through the browser
+- complete the Nova3D sign-in flow in the browser tab that opens
 - call `nova3d_status` to confirm credits and readiness
 
 Advanced/manual fallback: set `NOVA3D_TOKEN` if you cannot complete the browser flow.
@@ -29,6 +30,7 @@ Full documentation and source: https://github.com/RareSense/nova3d-mcp
 
 - `nova3d_setup` - get setup instructions if the user hasn't configured a token yet
 - `nova3d_login` - start the preferred browser-based Nova3D sign-in flow and store a local MCP session
+- if browser sign-in finishes but local completion is ambiguous, call `nova3d_status` before falling back to manual token setup
 - `nova3d_status` - return the canonical Nova3D onboarding/readiness state, including credits and next action
 - `nova3d_logout` - clear the locally stored MCP session
 - `generate_3d` - generate a structured GLB from a text prompt or reference image using Nova3D's paid v2 workflow; returns glb_url, conversation_url, named parts list, and code_artifact

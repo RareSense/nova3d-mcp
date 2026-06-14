@@ -8,6 +8,7 @@ and progress callback behaviour.
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 import nova3d_mcp.server as server_module
+from nova3d_mcp.auth import Nova3DLoginError
 from nova3d_mcp.models import WorkflowStatus, WorkflowState
 
 
@@ -386,6 +387,7 @@ async def test_nova3d_setup_returns_url_and_command():
     result = await server_module.nova3d_setup()
     assert "nova3d_login" in result["instructions"]
     assert "nova3d_status" in result["instructions"]
+    assert "browser tab" in result["instructions"]
     assert "claude mcp add nova3d" in result["instructions"]
 
 
@@ -395,6 +397,44 @@ async def test_nova3d_setup_available_when_startup_error_set():
     server_module._startup_error = "NOVA3D_TOKEN is not set."
     result = await server_module.nova3d_setup()
     assert "nova3d_login" in result["instructions"]
+
+
+@pytest.mark.asyncio
+async def test_nova3d_login_returns_status_recovery_on_ambiguous_completion():
+    mock_auth = MagicMock()
+    mock_auth.login_with_progress = AsyncMock(
+        side_effect=Nova3DLoginError(
+            "Nova3D browser sign-in was opened successfully, but the local MCP callback was not confirmed yet.",
+            browser_url="https://app.nova3d.xyz/mcp/connect?state=abc&port=5555",
+            should_check_status=True,
+        )
+    )
+
+    with patch("nova3d_mcp.server.Nova3DAuthenticator", return_value=mock_auth):
+        result = await server_module.nova3d_login()
+
+    assert result["failed"] is True
+    assert result["browser_url"].startswith("https://app.nova3d.xyz/mcp/connect")
+    assert result["suggested_next_step"] == "call nova3d_status"
+    assert "retry nova3d_login" in result["recovery_instructions"]
+    assert "manual_fallback_available" not in result
+
+
+@pytest.mark.asyncio
+async def test_nova3d_login_marks_manual_fallback_only_for_loopback_unavailable():
+    mock_auth = MagicMock()
+    mock_auth.login_with_progress = AsyncMock(
+        side_effect=Nova3DLoginError(
+            "Nova3D could not start the local callback listener needed for browser sign-in.",
+            manual_fallback_only=True,
+        )
+    )
+
+    with patch("nova3d_mcp.server.Nova3DAuthenticator", return_value=mock_auth):
+        result = await server_module.nova3d_login()
+
+    assert result["failed"] is True
+    assert result["manual_fallback_available"] is True
 
 
 @pytest.mark.asyncio
