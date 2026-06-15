@@ -52,9 +52,10 @@ currently ship an embedded IDE-native 3D viewport.
 
 ---
 
-## Quickstart
+## Install
 
-### 1. Install in your MCP client
+Add the MCP server in your client first. This only registers the server. It
+does **not** complete Nova3D account onboarding yet.
 
 #### Codex
 
@@ -129,7 +130,53 @@ Create `<SOLUTIONDIR>/.mcp.json` or `%USERPROFILE%/.mcp.json`:
 You can also add the server from the Visual Studio MCP UI by providing the
 stdio command `uvx` with args `["nova3d-mcp"]`.
 
-### 3. Generate
+## First Run
+
+After installing the MCP server in any client:
+
+1. Call `nova3d_login`
+2. Complete the Nova3D sign-in flow in the browser tab that opens
+3. Call `nova3d_status`
+4. If `next_action == "purchase_credits"`, follow the returned purchase link
+5. When `authenticated: true` and `generation_ready: true`, start using `generate_3d`
+
+Important:
+
+- Installing the MCP server and completing Nova3D sign-in are separate steps.
+- `nova3d_login` opens a browser tab and may return `login_pending_confirmation: true`
+  while local MCP session setup is still being confirmed.
+- If browser sign-in finishes but login completion is ambiguous, call
+  `nova3d_status` before retrying or considering manual fallback.
+- `NOVA3D_TOKEN` is an advanced/manual fallback only for environments where
+  browser/loopback auth is unavailable.
+
+## For AI Assistants
+
+If you are helping a user set up Nova3D MCP:
+
+1. Ensure the `nova3d` MCP server is installed in the client
+2. Call `nova3d_login`
+3. Tell the user a browser tab will open and they must complete sign-in there
+4. After browser sign-in, call `nova3d_status`
+5. If `next_action == "purchase_credits"`, direct the user to the returned URL
+6. Proceed to `generate_3d` only when `authenticated: true` and `generation_ready: true`
+7. Only suggest manual `NOVA3D_TOKEN` setup if browser/loopback auth is unavailable
+
+## Onboarding Decision Tree
+
+- If `nova3d_login` returns `login_pending_confirmation: true`
+  - complete the browser sign-in flow
+  - then call `nova3d_status`
+- If `nova3d_status.next_action == "sign_in"`
+  - call `nova3d_login`
+- If `nova3d_status.next_action == "session_expired"`
+  - call `nova3d_login` again
+- If `nova3d_status.next_action == "purchase_credits"`
+  - follow the returned purchase URL
+- If `nova3d_status.next_action == null` and `generation_ready == true`
+  - proceed to `generate_3d`
+
+## Local install
 
 If you prefer to install from source instead of `uvx`, clone the repository and
 install the package locally:
@@ -144,7 +191,9 @@ pip install .
 Then replace `uvx nova3d-mcp` in the client examples above with the local
 `nova3d-mcp` executable from your environment.
 
-Pass a prompt like this to your AI agent:
+## Typical workflow
+
+Once onboarding is complete, pass a prompt like this to your AI agent:
 
 ```
 Generate a vending machine with separate door, glass panel, coin slot,
@@ -172,7 +221,8 @@ The agent calls `generate_3d`. You get back:
 
 - `conversation_url` is the standard supported way to inspect generated assets — it opens your fully hydrated editing session in the Nova3D app.
 - Preferred onboarding is browser sign-in through `nova3d_login`, then `nova3d_status` to confirm credits/readiness.
-- `nova3d_login` opens a browser tab and may wait for a local loopback callback before it completes.
+- `nova3d_login` opens a browser tab and starts local MCP session setup through a loopback callback.
+- `nova3d_status` is the canonical follow-up check for authentication, credits, and readiness.
 - Keep secrets out of checked-in workspace config when possible. Prefer
   per-user configuration files or client-managed environment variables.
 - If your editor supports source-controlled MCP config, commit the server entry
@@ -185,6 +235,7 @@ The agent calls `generate_3d`. You get back:
 | Problem | What to check |
 |---|---|
 | Prompted to sign in before generation | Call `nova3d_login`, then re-check with `nova3d_status` |
+| `nova3d_login` returns `login_pending_confirmation: true` | Finish the browser sign-in step, then call `nova3d_status` |
 | Browser sign-in finished but `nova3d_login` did not confirm completion | Call `nova3d_status` now. If it still shows not signed in, retry `nova3d_login` |
 | Told that credits are required | Follow the purchase link returned by `nova3d_status` |
 | Auth failure on startup | Sign in again with `nova3d_login`, or confirm the manual key at https://app.nova3d.xyz/api-key |
