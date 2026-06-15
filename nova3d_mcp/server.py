@@ -30,7 +30,7 @@ from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP
 from mcp.server.fastmcp.server import Context
 
-from nova3d_mcp.auth import Nova3DAuthenticator, Nova3DLoginError, PendingLogin
+from nova3d_mcp.auth import Nova3DAuthenticator, Nova3DLoginError
 from nova3d_mcp.client import Nova3DClient, Nova3DAuthError, Nova3DError
 from nova3d_mcp.conversation import (
     build_edit_message,
