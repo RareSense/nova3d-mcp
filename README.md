@@ -130,6 +130,10 @@ Create `<SOLUTIONDIR>/.mcp.json` or `%USERPROFILE%/.mcp.json`:
 You can also add the server from the Visual Studio MCP UI by providing the
 stdio command `uvx` with args `["nova3d-mcp"]`.
 
+After the server is installed in any client, the next step is to call
+`nova3d_login` or `nova3d_setup` from inside that client. Installation alone
+does not complete Nova3D onboarding.
+
 ## First Run
 
 After installing the MCP server in any client:

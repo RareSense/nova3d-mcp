@@ -388,6 +388,8 @@ async def test_add_part_propagates_conversation_id(monkeypatch):
 @pytest.mark.asyncio
 async def test_nova3d_setup_returns_url_and_command():
     result = await server_module.nova3d_setup()
+    assert "next step is not generation yet" in result["instructions"]
+    assert "Call nova3d_login from inside your MCP client" in result["instructions"]
     assert "nova3d_login" in result["instructions"]
     assert "nova3d_status" in result["instructions"]
     assert "browser tab" in result["instructions"]
@@ -400,6 +402,7 @@ async def test_nova3d_setup_available_when_startup_error_set():
     server_module._startup_error = "NOVA3D_TOKEN is not set."
     result = await server_module.nova3d_setup()
     assert "nova3d_login" in result["instructions"]
+    assert "next step is not generation yet" in result["instructions"]
 
 
 @pytest.mark.asyncio
