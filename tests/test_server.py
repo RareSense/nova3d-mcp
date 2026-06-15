@@ -6,9 +6,10 @@ and progress callback behaviour.
 ────────────────────────────────────────────────────────────────
 """
 import pytest
+import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 import nova3d_mcp.server as server_module
-from nova3d_mcp.auth import Nova3DLoginError
+from nova3d_mcp.auth import Nova3DLoginError, PendingLogin
 from nova3d_mcp.models import WorkflowStatus, WorkflowState
 
 
@@ -16,8 +17,10 @@ from nova3d_mcp.models import WorkflowStatus, WorkflowState
 def reset_startup_error():
     """Reset _startup_error before and after every test."""
     server_module._startup_error = None
+    server_module._pending_login = None
     yield
     server_module._startup_error = None
+    server_module._pending_login = None
 
 
 @pytest.fixture(autouse=True)
@@ -401,12 +404,21 @@ async def test_nova3d_setup_available_when_startup_error_set():
 
 @pytest.mark.asyncio
 async def test_nova3d_login_returns_status_recovery_on_ambiguous_completion():
-    mock_auth = MagicMock()
-    mock_auth.login_with_progress = AsyncMock(
-        side_effect=Nova3DLoginError(
+    loop = asyncio.get_running_loop()
+    task = loop.create_future()
+    task.set_exception(
+        Nova3DLoginError(
             "Nova3D browser sign-in was opened successfully, but the local MCP callback was not confirmed yet.",
             browser_url="https://app.nova3d.xyz/mcp/connect?state=abc&port=5555",
             should_check_status=True,
+        )
+    )
+    mock_auth = MagicMock()
+    mock_auth.begin_login = AsyncMock(
+        return_value=PendingLogin(
+            connect_url="https://app.nova3d.xyz/mcp/connect?state=abc&port=5555",
+            port=5555,
+            task=task,
         )
     )
 
@@ -423,7 +435,7 @@ async def test_nova3d_login_returns_status_recovery_on_ambiguous_completion():
 @pytest.mark.asyncio
 async def test_nova3d_login_marks_manual_fallback_only_for_loopback_unavailable():
     mock_auth = MagicMock()
-    mock_auth.login_with_progress = AsyncMock(
+    mock_auth.begin_login = AsyncMock(
         side_effect=Nova3DLoginError(
             "Nova3D could not start the local callback listener needed for browser sign-in.",
             manual_fallback_only=True,
@@ -435,6 +447,59 @@ async def test_nova3d_login_marks_manual_fallback_only_for_loopback_unavailable(
 
     assert result["failed"] is True
     assert result["manual_fallback_available"] is True
+
+
+@pytest.mark.asyncio
+async def test_nova3d_login_returns_pending_payload_when_background_auth_in_progress():
+    loop = asyncio.get_running_loop()
+    task = loop.create_future()
+    mock_auth = MagicMock()
+    mock_auth.begin_login = AsyncMock(
+        return_value=PendingLogin(
+            connect_url="https://app.nova3d.xyz/mcp/connect?state=abc&port=5555",
+            port=5555,
+            task=task,
+        )
+    )
+
+    with patch("nova3d_mcp.server.Nova3DAuthenticator", return_value=mock_auth):
+        result = await server_module.nova3d_login()
+
+    assert result["login_started"] is True
+    assert result["login_pending_confirmation"] is True
+    assert result["suggested_next_step"] == "call nova3d_status"
+    assert result["browser_url"].startswith("https://app.nova3d.xyz/mcp/connect")
+    task.cancel()
+
+
+@pytest.mark.asyncio
+async def test_nova3d_status_reflects_pending_login():
+    loop = asyncio.get_running_loop()
+    task = loop.create_future()
+    server_module._pending_login = server_module.PendingLoginState(
+        connect_url="https://app.nova3d.xyz/mcp/connect?state=abc&port=5555",
+        port=5555,
+        task=task,
+    )
+
+    status = MagicMock()
+    status.authenticated = False
+    status.generation_ready = False
+    status.next_action = "sign_in"
+    status.next_action_url = "https://nova3d.xyz/mcp/connect"
+    status.user_message = "Sign in to Nova3D to continue."
+    status.identity = None
+    status.credits = None
+    status.mcp_session = MagicMock()
+    status.mcp_session.model_dump.return_value = {"established": False, "expires_at": None}
+
+    with patch("nova3d_mcp.server._get_mcp_status", AsyncMock(return_value=status)):
+        result = await server_module.nova3d_status()
+
+    assert result["login_pending_confirmation"] is True
+    assert result["browser_url"].startswith("https://app.nova3d.xyz/mcp/connect")
+    assert result["suggested_next_step"] == "call nova3d_status"
+    task.cancel()
 
 
 @pytest.mark.asyncio

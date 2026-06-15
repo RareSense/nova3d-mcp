@@ -39,6 +39,13 @@ class LoginResult:
     port: int
 
 
+@dataclass
+class PendingLogin:
+    connect_url: str
+    port: int
+    task: "asyncio.Task[LoginResult]"
+
+
 class Nova3DAuthenticator:
     def __init__(
         self,
@@ -58,6 +65,13 @@ class Nova3DAuthenticator:
         self,
         on_progress: Optional[Callable[[str], Awaitable[None]]] = None,
     ) -> LoginResult:
+        pending = await self.begin_login(on_progress=on_progress)
+        return await pending.task
+
+    async def begin_login(
+        self,
+        on_progress: Optional[Callable[[str], Awaitable[None]]] = None,
+    ) -> PendingLogin:
         state = secrets.token_urlsafe(32)
         loopback = LoopbackServer()
         try:
@@ -86,6 +100,27 @@ class Nova3DAuthenticator:
             on_progress,
             "Complete the Nova3D sign-in flow in the browser tab that opened, then wait here for confirmation.",
         )
+
+        task = asyncio.create_task(
+            self._complete_login(
+                loopback=loopback,
+                state=state,
+                connect_url=connect_url,
+                port=port,
+                on_progress=on_progress,
+            )
+        )
+        return PendingLogin(connect_url=connect_url, port=port, task=task)
+
+    async def _complete_login(
+        self,
+        *,
+        loopback: LoopbackServer,
+        state: str,
+        connect_url: str,
+        port: int,
+        on_progress: Optional[Callable[[str], Awaitable[None]]] = None,
+    ) -> LoginResult:
 
         try:
             callback = await loopback.wait_for_callback(LOGIN_TIMEOUT_SECONDS)

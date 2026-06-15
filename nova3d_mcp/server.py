@@ -22,6 +22,7 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
@@ -29,7 +30,7 @@ from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP
 from mcp.server.fastmcp.server import Context
 
-from nova3d_mcp.auth import Nova3DAuthenticator, Nova3DLoginError
+from nova3d_mcp.auth import Nova3DAuthenticator, Nova3DLoginError, PendingLogin
 from nova3d_mcp.client import Nova3DClient, Nova3DAuthError, Nova3DError
 from nova3d_mcp.conversation import (
     build_edit_message,
@@ -43,6 +44,7 @@ load_dotenv()
 # ── Startup error state ───────────────────────────────────────────────────────
 
 _startup_error: Optional[str] = None
+_pending_login: Optional["PendingLoginState"] = None
 
 # ── Model options ─────────────────────────────────────────────────────────────
 
@@ -84,10 +86,18 @@ _MODEL_OPTIONS: Dict[str, Dict[str, str]] = {
     },
 }
 _DEFAULT_MODEL = "gemini"
+LOGIN_GRACE_PERIOD_SECONDS = 1.0
 
 
 def _resolve_model(model: Optional[str]) -> Optional[Dict[str, str]]:
     return _MODEL_OPTIONS.get((model or _DEFAULT_MODEL).strip())
+
+
+@dataclass
+class PendingLoginState:
+    connect_url: str
+    port: int
+    task: "asyncio.Task[Any]"
 
 # ── Server init ───────────────────────────────────────────────────────────────
 
@@ -420,6 +430,74 @@ def _status_payload(status: MCPStatus) -> Dict[str, Any]:
     return payload
 
 
+def _pending_login_payload(pending: PendingLoginState) -> Dict[str, Any]:
+    return {
+        "login_started": True,
+        "login_pending_confirmation": True,
+        "browser_url": pending.connect_url,
+        "local_callback_port": pending.port,
+        "user_message": (
+            "Complete Nova3D sign-in in the browser tab that opened, then call nova3d_status "
+            "to confirm credits and readiness."
+        ),
+        "suggested_next_step": "call nova3d_status",
+    }
+
+
+def _structured_login_error_payload(
+    error: Nova3DLoginError,
+    *,
+    browser_url: Optional[str] = None,
+) -> Dict[str, Any]:
+    payload: Dict[str, Any] = {
+        "failed": True,
+        "error_message": str(error),
+    }
+    if browser_url or error.browser_url:
+        payload["browser_url"] = browser_url or error.browser_url
+    if error.should_check_status:
+        payload["suggested_next_step"] = "call nova3d_status"
+        payload["recovery_instructions"] = (
+            "If you completed sign-in in the browser, call nova3d_status now. "
+            "If status still shows not signed in, retry nova3d_login."
+        )
+    if error.manual_fallback_only:
+        payload["manual_fallback_available"] = True
+    return payload
+
+
+async def _consume_pending_login_result() -> Optional[Dict[str, Any]]:
+    global _pending_login
+
+    pending = _pending_login
+    if pending is None or not pending.task.done():
+        return None
+
+    _pending_login = None
+    try:
+        result = await pending.task
+    except Nova3DLoginError as e:
+        return _structured_login_error_payload(e, browser_url=pending.connect_url)
+    except Exception:
+        return {
+            "failed": True,
+            "browser_url": pending.connect_url,
+            "suggested_next_step": "call nova3d_status",
+            "error_message": (
+                "Nova3D browser sign-in may have completed, but the MCP session could not be confirmed yet. "
+                "Call nova3d_status now. If status still shows not signed in, retry nova3d_login."
+            ),
+        }
+
+    payload = _status_payload(result.status)
+    payload["browser_url"] = result.connect_url
+    payload["local_session_path"] = str(_get_session_store().path)
+    payload["login_started"] = True
+    if result.expires_at:
+        payload["stored_session_expires_at"] = result.expires_at
+    return payload
+
+
 # ── Tools ─────────────────────────────────────────────────────────────────────
 
 @mcp.tool()
@@ -452,8 +530,15 @@ async def nova3d_status() -> Dict[str, Any]:
 
     Use this before generation, after sign-in, or after purchasing credits.
     """
+    pending_result = await _consume_pending_login_result()
+    if pending_result is not None:
+        return pending_result
+
     status = await _get_mcp_status()
-    return _status_payload(status)
+    payload = _status_payload(status)
+    if _pending_login is not None and not _pending_login.task.done():
+        payload.update(_pending_login_payload(_pending_login))
+    return payload
 
 
 @mcp.tool()
@@ -469,34 +554,52 @@ async def nova3d_login(ctx: Optional[Context] = None) -> Dict[str, Any]:
     If browser sign-in finishes but local completion is ambiguous, call
     nova3d_status before falling back to manual NOVA3D_TOKEN setup.
     """
+    global _pending_login
+
+    finished_payload = await _consume_pending_login_result()
+    if finished_payload is not None:
+        return finished_payload
+
+    if _pending_login is not None and not _pending_login.task.done():
+        return _pending_login_payload(_pending_login)
+
     authenticator = Nova3DAuthenticator(
         base_url=_get_api_url(),
         app_url=_get_app_url(),
         session_store=_get_session_store(),
     )
     try:
-        result = await authenticator.login_with_progress(
+        pending = await authenticator.begin_login(
             on_progress=_make_login_progress_callback(ctx),
         )
-    except Nova3DLoginError as e:
-        payload: Dict[str, Any] = {
-            "failed": True,
-            "error_message": str(e),
-        }
-        if e.browser_url:
-            payload["browser_url"] = e.browser_url
-        if e.should_check_status:
-            payload["suggested_next_step"] = "call nova3d_status"
-            payload["recovery_instructions"] = (
-                "If you completed sign-in in the browser, call nova3d_status now. "
-                "If status still shows not signed in, retry nova3d_login."
+        _pending_login = PendingLoginState(
+            connect_url=pending.connect_url,
+            port=pending.port,
+            task=pending.task,
+        )
+        try:
+            result = await asyncio.wait_for(
+                asyncio.shield(pending.task),
+                timeout=LOGIN_GRACE_PERIOD_SECONDS,
             )
-        if e.manual_fallback_only:
-            payload["manual_fallback_available"] = True
-        return payload
+        except asyncio.TimeoutError:
+            return _pending_login_payload(_pending_login)
+        _pending_login = None
+    except Nova3DLoginError as e:
+        return _structured_login_error_payload(e)
+    except Exception:
+        return {
+            "failed": True,
+            "error_message": (
+                "Nova3D sign-in started, but the local MCP session could not be confirmed yet. "
+                "Call nova3d_status now. If status still shows not signed in, retry nova3d_login."
+            ),
+            "suggested_next_step": "call nova3d_status",
+        }
     payload = _status_payload(result.status)
     payload["browser_url"] = result.connect_url
     payload["local_session_path"] = str(_get_session_store().path)
+    payload["login_started"] = True
     if result.expires_at:
         payload["stored_session_expires_at"] = result.expires_at
     return payload
