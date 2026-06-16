@@ -29,6 +29,14 @@ def mock_api():
         yield mock
 
 
+@pytest.fixture(autouse=True)
+def isolate_session_store(tmp_path, monkeypatch):
+    monkeypatch.setenv(
+        "NOVA3D_SESSION_PATH",
+        str(tmp_path / "mcp-session.json"),
+    )
+
+
 def _readiness_ok():
     return {"ready": True, "reason": None, "projected_cost": 10, "authorized_budget": 12}
 

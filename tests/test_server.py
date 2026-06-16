@@ -24,6 +24,14 @@ def reset_startup_error():
 
 
 @pytest.fixture(autouse=True)
+def isolate_session_store(tmp_path, monkeypatch):
+    monkeypatch.setenv(
+        "NOVA3D_SESSION_PATH",
+        str(tmp_path / "mcp-session.json"),
+    )
+
+
+@pytest.fixture(autouse=True)
 def allow_generation_readiness_by_default(monkeypatch):
     monkeypatch.setattr(
         server_module,
