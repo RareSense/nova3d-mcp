@@ -9,6 +9,7 @@ def test_render_success_page_uses_neutral_client_fallback():
     html = _render_success_page(None)
 
     assert "Nova3D connected" in html
+    assert "Your local Nova3D connection is ready." in html
     assert "return to your MCP client now" in html
     assert "check Nova3D status again from your MCP client" in html
 
@@ -17,6 +18,7 @@ def test_render_success_page_uses_explicit_client_name():
     html = _render_success_page("Claude Code")
 
     assert "Nova3D connected to Claude Code" in html
+    assert "Your local Nova3D connection is ready in Claude Code." in html
     assert "return to Claude Code now" in html
     assert "check Nova3D status again from Claude Code" in html
 
@@ -60,7 +62,8 @@ async def test_loopback_server_captures_callback_and_serves_styled_page():
     response_text = writer.buffer.decode("utf-8")
     assert "HTTP/1.1 200 OK" in response_text
     assert "Nova3D connected to Codex" in response_text
-    assert "secure local MCP handoff" in response_text
+    assert "Your local Nova3D connection is ready in Codex." in response_text
+    assert "finished its local connection step on this machine" in response_text
     assert "return to Codex now" in response_text
     assert callback.code == "session-123"
     assert callback.state == "state-abc"

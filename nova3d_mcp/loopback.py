@@ -98,11 +98,20 @@ class LoopbackServer:
 
 
 def _render_success_page(client_name: Optional[str]) -> str:
-    destination = escape(client_name.strip()) if client_name and client_name.strip() else "your MCP client"
+    destination = (
+        escape(client_name.strip())
+        if client_name and client_name.strip()
+        else "your MCP client"
+    )
     title = (
         f"Nova3D connected to {destination}"
         if destination != "your MCP client"
         else "Nova3D connected"
+    )
+    subtitle = (
+        f"Your local Nova3D connection is ready in {destination}."
+        if destination != "your MCP client"
+        else "Your local Nova3D connection is ready."
     )
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -120,6 +129,7 @@ def _render_success_page(client_name: Optional[str]) -> str:
         --panel: #ffffff;
         --panel-tint: #dff3fb;
         --accent: #f8a9c6;
+        --accent-border: #dc81a6;
       }}
 
       * {{
@@ -178,26 +188,44 @@ def _render_success_page(client_name: Optional[str]) -> str:
 
       .panel {{
         margin-top: 22px;
-        padding: 18px 20px;
+        padding: 16px 18px;
         border: 2px solid #8fd4ea;
         border-radius: 14px;
         background: var(--panel-tint);
       }}
 
-      .panel strong {{
+      .panel-title {{
+        display: block;
+        margin-bottom: 6px;
         color: var(--ink);
+        font-size: 14px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
       }}
 
       .next-step {{
         margin-top: 20px;
-        padding: 16px 18px;
-        border: 2px solid var(--border);
+        padding: 18px 20px;
+        border: 2px solid var(--accent-border);
         border-radius: 14px;
-        background: rgba(248, 169, 198, 0.12);
+        background: rgba(248, 169, 198, 0.22);
       }}
 
-      .next-step strong {{
+      .next-step-title {{
+        display: block;
+        margin-bottom: 6px;
         color: var(--ink);
+        font-size: 14px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }}
+
+      .next-step p {{
+        color: var(--ink);
+        font-size: 21px;
+        line-height: 1.45;
       }}
 
       .footer {{
@@ -210,16 +238,14 @@ def _render_success_page(client_name: Optional[str]) -> str:
     <main class="card">
       <div class="eyebrow">MCP setup complete</div>
       <h1>{title}</h1>
-      <p>
-        Nova3D successfully completed the secure local MCP handoff on this machine.
-      </p>
-      <section class="panel">
-        <strong>What happened:</strong>
-        The Nova3D browser sign-in flow exchanged its one-time session code with your local MCP client.
-      </section>
+      <p>{subtitle}</p>
       <section class="next-step">
-        <strong>Next step:</strong>
-        You can close this tab and return to {destination} now.
+        <span class="next-step-title">Next step</span>
+        <p>You can close this tab and return to {destination} now.</p>
+      </section>
+      <section class="panel">
+        <span class="panel-title">What happened</span>
+        The Nova3D browser sign-in flow finished its local connection step on this machine.
       </section>
       <p class="footer">
         If setup does not continue automatically, check Nova3D status again from {destination}.
