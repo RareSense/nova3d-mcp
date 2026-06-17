@@ -11,6 +11,22 @@ panel, and hose connectors — separately editable, not fused into a blob.
 
 ---
 
+## Quickstart
+
+Claude Code:
+
+1. Run `claude mcp add nova3d -- uvx nova3d-mcp`
+2. In Claude, call `nova3d_login`
+3. Complete the Nova3D browser sign-in flow
+4. Then call `nova3d_status`
+
+Other MCP clients:
+
+- See [Install](#install) for client-specific setup
+- Then follow the shared [First Run](#first-run) steps
+
+---
+
 ## Why Nova3D
 
 Every major AI 3D generator today produces **mesh blobs** — a single fused
