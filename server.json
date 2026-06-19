@@ -1,9 +1,9 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
-  "name": "io.github.raresense/nova3d-mcp",
+  "name": "io.github.RareSense/nova3d-mcp",
   "title": "Nova3D",
   "description": "Structured, part-aware 3D generation for AI agents. Named-part GLB, preview URL, Blender script.",
-  "version": "0.2.5",
+  "version": "0.2.6",
   "repository": {
     "url": "https://github.com/RareSense/nova3d-mcp",
     "source": "github"
@@ -13,7 +13,7 @@
       "registryType": "pypi",
       "registryBaseUrl": "https://pypi.org",
       "identifier": "nova3d-mcp",
-      "version": "0.2.5",
+      "version": "0.2.6",
       "runtimeHint": "uvx",
       "transport": {
         "type": "stdio"
