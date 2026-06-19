@@ -6,25 +6,30 @@
   "version": "0.2.4",
   "repository": {
     "url": "https://github.com/RareSense/nova3d-mcp",
-    "type": "git"
+    "source": "github"
   },
   "packages": [
     {
       "registryType": "pypi",
+      "registryBaseUrl": "https://pypi.org",
       "identifier": "nova3d-mcp",
+      "version": "0.2.4",
+      "runtimeHint": "uvx",
       "transport": {
         "type": "stdio"
       },
-      "env": [
+      "environmentVariables": [
         {
           "name": "NOVA3D_TOKEN",
           "description": "Advanced/manual fallback API key from https://app.nova3d.xyz/api-key. Preferred onboarding is browser sign-in via nova3d_login.",
-          "required": false
+          "isRequired": false,
+          "isSecret": true
         },
         {
           "name": "NOVA3D_APP_URL",
           "description": "App URL used for conversation links, for example https://app.nova3d.xyz or http://127.0.0.1:5555",
-          "required": false
+          "isRequired": false,
+          "isSecret": false
         }
       ]
     }
