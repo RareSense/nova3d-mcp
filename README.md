@@ -1,5 +1,7 @@
 # nova3d-mcp
 
+<!-- mcp-name: io.github.raresense/nova3d-mcp -->
+
 **Structured, part-aware 3D generation for AI agents.**
 
 nova3d-mcp is an [MCP](https://modelcontextprotocol.io) server that exposes
