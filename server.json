@@ -3,7 +3,7 @@
   "name": "io.github.raresense/nova3d-mcp",
   "title": "Nova3D",
   "description": "Structured, part-aware 3D generation for AI agents. Named-part GLB, preview URL, Blender script.",
-  "version": "0.1.2",
+  "version": "0.2.4",
   "repository": {
     "url": "https://github.com/RareSense/nova3d-mcp",
     "type": "git"
@@ -18,8 +18,8 @@
       "env": [
         {
           "name": "NOVA3D_TOKEN",
-          "description": "API key from https://app.nova3d.xyz/api-key",
-          "required": true
+          "description": "Advanced/manual fallback API key from https://app.nova3d.xyz/api-key. Preferred onboarding is browser sign-in via nova3d_login.",
+          "required": false
         },
         {
           "name": "NOVA3D_APP_URL",
