@@ -1,3 +1,7 @@
+> [!WARNING]
+> **Moved:** Development continues in the Nova3D monorepo:
+> https://github.com/RareSense/Nova3D/tree/main/mcp
+
 # nova3d-mcp
 
 <!-- mcp-name: io.github.RareSense/nova3d-mcp -->
